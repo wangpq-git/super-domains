@@ -1,5 +1,5 @@
 from prometheus_client import Gauge, start_http_server
-from db.db_config import session, shutdown_session
+from db.db_config import Session, shutdown_session
 import threading
 import time
 from logs.logs import Logger
@@ -15,16 +15,14 @@ err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 # Prometheus 指标定义
 
 domains_info = Gauge(
-    'Value',
-    'Value',
+    'domains_info',
+    'Domain info',
     ['domainName', 'source', 'domain_created_time', 'domain_expires_time']
 )
 
 # 数据获取函数
 def fetch_domains():
-    # 确保会话处于干净状态
-    # if session.transaction.is_active:
-    #     session.rollback()
+    session = Session()
     all_data = []
     try:
         for model in [Namecheap, Dynadot, Namecom]:
@@ -56,7 +54,7 @@ def update_metrics():
                     source=item['source'],
                     domain_created_time=item['created'].strftime('%Y-%m-%d-%H:%M:%S') if item['created'] else None,
                     domain_expires_time=item['expires'].strftime('%Y-%m-%d-%H:%M:%S') if item['expires'] else None,
-                ).set(1 if item['name'] else 0)
+                ).set(item['expires'].timestamp() if item['expires'] else 0)
 
             info_log.logger.info("Prometheus metrics updated.")
         except Exception as e:

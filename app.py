@@ -2,7 +2,7 @@ import logging
 from flask import Flask, request, jsonify, current_app
 from flask_cors import CORS
 from main import main
-from db.db_config import session, shutdown_session  # 修改为直接导入
+from db.db_config import Session, shutdown_session  # 修改为直接导入
 from db.cloudflare import Domain as Cloudflare
 from db.namecom import Domain as Namecom
 from db.dynadot import Domain as Dynadot
@@ -53,6 +53,7 @@ def search_domain():
     }
 
     results = {}
+    session = Session()
     try:
         for table_name, model in tables.items():
             # 精确查询（注意：SQLAlchemy的echo=True会在此打印实际SQL）
@@ -80,6 +81,7 @@ def search_domain():
 
 @app.route('/sync', methods=['GET'])
 def sync_data():
+    session = Session()
     try:
         # 执行同步前先确保会话健康
         if session.transaction.is_active:
@@ -101,13 +103,11 @@ def sync_data():
 
 @app.route('/', methods=['GET'])
 def health():
+    session = Session()
     try:
         return jsonify({"status": "healthy"})
     except Exception as e:
-        session.rollback()
         return jsonify({"status": "unhealthy", "error": str(e)}), 500
-    finally:
-        session.close()
 
 
 def configure_logging():
@@ -141,4 +141,4 @@ if __name__ == '__main__':
     err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
     configure_logging()
     start_prometheus_exporter()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5999, debug=False)
