@@ -141,4 +141,4 @@ if __name__ == '__main__':
     err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
     configure_logging()
     start_prometheus_exporter()
-    app.run(host='0.0.0.0', port=5999, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False)
