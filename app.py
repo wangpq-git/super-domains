@@ -1,12 +1,17 @@
+import logging
 from flask import Flask, request, jsonify, current_app
+from flask_cors import CORS
 from main import main
 from db.db_config import session, shutdown_session  # 修改为直接导入
 from db.cloudflare import Domain as Cloudflare
 from db.namecom import Domain as Namecom
 from db.dynadot import Domain as Dynadot
 from db.namecheap import Domain as Namecheap
+from logs.logs import Logger
+
 
 app = Flask(__name__)
+CORS(app)
 
 # 确保每个请求结束后清理会话
 app.teardown_appcontext(shutdown_session)
@@ -102,5 +107,35 @@ def health():
     finally:
         session.close()
 
+
+def configure_logging():
+    # 获取 Flask 的日志处理器
+    flask_logger = app.logger
+    werkzeug_logger = logging.getLogger('werkzeug')
+
+    # 移除默认的 Flask 和 werkzeug 日志处理器
+    for handler in list(flask_logger.handlers):
+        flask_logger.removeHandler(handler)
+    for handler in list(werkzeug_logger.handlers):
+        werkzeug_logger.removeHandler(handler)
+
+    # 添加自定义的日志处理器
+    flask_logger.addHandler(info_log.logger.handlers[0])  # 文件日志处理器
+    flask_logger.addHandler(info_log.logger.handlers[1])  # 屏幕日志处理器
+
+    werkzeug_logger.addHandler(info_log.logger.handlers[0])  # 文件日志处理器
+    werkzeug_logger.addHandler(info_log.logger.handlers[1])  # 屏幕日志处理器
+
+    # 设置日志级别
+    flask_logger.setLevel(logging.INFO)
+    werkzeug_logger.setLevel(logging.INFO)
+
+    # 确保日志处理器生效
+    logging.getLogger().setLevel(logging.INFO)
+
+
 if __name__ == '__main__':
+    info_log = Logger('info.log', level='info')
+    err_log = Logger('error.log', level='error')
+    configure_logging()
     app.run(host='0.0.0.0', port=5000, debug=True)
