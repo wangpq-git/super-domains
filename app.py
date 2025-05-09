@@ -1,6 +1,6 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, current_app
 from main import main
-from db.db_config import session  # 修改为直接导入
+from db.db_config import session, shutdown_session  # 修改为直接导入
 from db.cloudflare import Domain as Cloudflare
 from db.namecom import Domain as Namecom
 from db.dynadot import Domain as Dynadot
@@ -8,6 +8,8 @@ from db.namecheap import Domain as Namecheap
 
 app = Flask(__name__)
 
+# 确保每个请求结束后清理会话
+app.teardown_appcontext(shutdown_session)
 
 def clean_domain_name(raw_name):
     """
@@ -72,11 +74,35 @@ def search_domain():
 @app.route('/sync', methods=['GET'])
 def sync_data():
     try:
-        main()
+        # 执行同步前先确保会话健康
+        if session.transaction.is_active:
+            session.rollback()
+
+        main()  # 将会话传递给main函数
+        session.commit()
         return jsonify({'success': True}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        session.rollback()  # 显式回滚
+        current_app.logger.error(f"Sync failed: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
+    finally:
+        session.close()  # 确保关闭
 
+@app.route('/', methods=['GET'])
+def health():
+    try:
+        # 测试简单查询
+        session.execute("SELECT 1")
+        return jsonify({"status": "healthy"})
+    except Exception as e:
+        session.rollback()
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+    finally:
+        session.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5999, debug=True)
