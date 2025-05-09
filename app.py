@@ -83,10 +83,6 @@ def search_domain():
 def sync_data():
     session = Session()
     try:
-        # 执行同步前先确保会话健康
-        if session.transaction.is_active:
-            session.rollback()
-
         main()  # 将会话传递给main函数
         session.commit()
         return jsonify({'success': True}), 200
