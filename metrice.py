@@ -13,23 +13,18 @@ info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
 err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 
 # Prometheus 指标定义
-domain_created_timestamp = Gauge(
-    'domain_created_timestamp',
-    'Domain creation timestamp',
-    ['domainName', 'source']
-)
 
-domain_expires_timestamp = Gauge(
-    'domain_expires_timestamp',
-    'Domain expiration timestamp',
-    ['domainName', 'source']
+domains_info = Gauge(
+    'Value',
+    'Value',
+    ['domainName', 'source', 'domain_created_time', 'domain_expires_time']
 )
 
 # 数据获取函数
 def fetch_domains():
     # 确保会话处于干净状态
-    if session.transaction and not session.transaction.is_active:
-        session.rollback()
+    # if session.transaction.is_active:
+    #     session.rollback()
     all_data = []
     try:
         for model in [Namecheap, Dynadot, Namecom]:
@@ -52,23 +47,22 @@ def update_metrics():
         try:
             data = fetch_domains()
 
-            domain_created_timestamp.clear()
-            domain_expires_timestamp.clear()
+            domains_info.clear()
 
             for item in data:
-                domain_created_timestamp.labels(
-                    domainName=item['name'], source=item['source']
-                ).set(item['created'].timestamp() if item['created'] else 0)
 
-                domain_expires_timestamp.labels(
-                    domainName=item['name'], source=item['source']
-                ).set(item['expires'].timestamp() if item['expires'] else 0)
+                domains_info.labels(
+                    domainName=item['name'],
+                    source=item['source'],
+                    domain_created_time=item['created'].strftime('%Y-%m-%d-%H:%M:%S') if item['created'] else None,
+                    domain_expires_time=item['expires'].strftime('%Y-%m-%d-%H:%M:%S') if item['expires'] else None,
+                ).set(1 if item['name'] else 0)
 
             info_log.logger.info("Prometheus metrics updated.")
         except Exception as e:
             err_log.logger.error(f"Error updating metrics: {e}")
 
-        time.sleep(30)  # 每 30 秒更新一次
+        time.sleep(3600)  # 每 30 秒更新一次
 
 # 启动 Prometheus 指标采集服务
 def start_prometheus_exporter():
