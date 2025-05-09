@@ -1,5 +1,5 @@
 from prometheus_client import Gauge, start_http_server
-from db.db_config import session
+from db.db_config import session, shutdown_session
 import threading
 import time
 from logs.logs import Logger
@@ -27,6 +27,9 @@ domain_expires_timestamp = Gauge(
 
 # 数据获取函数
 def fetch_domains():
+    # 确保会话处于干净状态
+    if session.transaction and not session.transaction.is_active:
+        session.rollback()
     all_data = []
     try:
         for model in [Namecheap, Dynadot, Namecom]:
@@ -74,4 +77,5 @@ def start_prometheus_exporter():
     t = threading.Thread(target=update_metrics)
     t.daemon = True
     t.start()
+
 
