@@ -8,6 +8,7 @@ from db.namecom import Domain as Namecom
 from db.dynadot import Domain as Dynadot
 from db.namecheap import Domain as Namecheap
 from logs.logs import Logger
+from config import APP_NAME,LOG_PATH
 
 
 app = Flask(__name__)
@@ -135,7 +136,7 @@ def configure_logging():
 
 
 if __name__ == '__main__':
-    info_log = Logger('info.log', level='info')
-    err_log = Logger('error.log', level='error')
+    info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
+    err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
     configure_logging()
     app.run(host='0.0.0.0', port=5000, debug=True)
