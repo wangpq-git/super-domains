@@ -95,8 +95,6 @@ def sync_data():
 @app.route('/', methods=['GET'])
 def health():
     try:
-        # 测试简单查询
-        session.execute("SELECT 1")
         return jsonify({"status": "healthy"})
     except Exception as e:
         session.rollback()
