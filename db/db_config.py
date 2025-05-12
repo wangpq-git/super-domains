@@ -4,15 +4,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-
 if os.getenv('Env') == "test":
-    DB_HOST = "test.scmp.sgt.sg2.mysql"
+    DB_HOST = "test.mercedes.ptc.sg2.mysql"
 elif os.getenv('Env') == "prod":
-    DB_HOST = "prod.scmp.sgt.sg2.mysql"
+    DB_HOST = "prod.mercedes.ptc.sg2.mysql"
 else:
     print("Env is not set")
     exit(1)
-    
+
 DB_PORT = 3306
 DB_USER = "domains_rw"
 DB_PASSWORD = "%EyXkyI5fb53M0#psc"
