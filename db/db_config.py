@@ -4,7 +4,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-from Code.Python.API.domain_v2.config import DB_PORT
 
 if os.getenv('Env') == "test":
     DB_HOST = "test.scmp.sgt.sg2.mysql"
