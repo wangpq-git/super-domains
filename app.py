@@ -9,7 +9,7 @@ from db.dynadot import Domain as Dynadot
 from db.namecheap import Domain as Namecheap
 from logs.logs import Logger
 from config import APP_NAME,LOG_PATH
-from metrice import start_prometheus_exporter
+from metrice import start_exporter
 
 
 app = Flask(__name__)
@@ -83,6 +83,7 @@ def search_domain():
 def sync_data():
     session = Session()
     try:
+
         main()  # 将会话传递给main函数
         session.commit()
         return jsonify({'success': True}), 200
@@ -136,5 +137,5 @@ if __name__ == '__main__':
     info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
     err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
     configure_logging()
-    start_prometheus_exporter()
+    start_exporter()
     app.run(host='0.0.0.0', port=5000, debug=False)

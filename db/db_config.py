@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
@@ -10,6 +12,8 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # 自动检测失效连接
     pool_recycle=3600,  # 1小时回收连接
+    pool_size=5,
+    max_overflow=10,
     isolation_level="READ COMMITTED"  # 明确隔离级别
 )
 Session = scoped_session(
@@ -30,3 +34,16 @@ def shutdown_session(exception=None):
     """请求结束时自动清理会话"""
     if Session.registry.has():
         Session.remove()
+
+@contextmanager
+def session_scope():
+    """提供事务范围的会话管理"""
+    session = Session()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

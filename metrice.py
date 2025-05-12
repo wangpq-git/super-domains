@@ -1,5 +1,9 @@
+import atexit
+
 from prometheus_client import Gauge, start_http_server
-from db.db_config import Session, shutdown_session
+from sqlalchemy.exc import SQLAlchemyError
+
+from db.db_config import session_scope,shutdown_session
 import threading
 import time
 from logs.logs import Logger
@@ -12,62 +16,84 @@ from config import APP_NAME,LOG_PATH
 info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
 err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 
-# Prometheus 指标定义
-
-domains_info = Gauge(
-    'domains_info',
-    'Domain info',
-    ['domainName', 'source', 'domain_created_time', 'domain_expires_time']
+# Prometheus指标定义（优化标签命名）
+DOMAIN_INFO = Gauge(
+    'domain_info',
+    'Domain registration information',
+    ['domain', 'registrar', 'created', 'expires']
 )
 
-# 数据获取函数
-def fetch_domains():
-    session = Session()
-    all_data = []
-    try:
-        for model in [Namecheap, Dynadot, Namecom]:
-            source = model.__tablename__
-            domains = session.query(model).all()
-            for d in domains:
-                all_data.append({
-                    'name': d.name,
-                    'created': d.created,
-                    'expires': d.expires,
-                    'source': source
-                })
-    except Exception as e:
-        err_log.logger.error(f"Database error: {e}")
-    return all_data
 
-# 指标更新函数
+def fetch_domains():
+    """安全获取域名数据"""
+    domains = []
+    try:
+        with session_scope() as session:
+            for model in [Namecheap, Dynadot, Namecom]:
+                try:
+                    for d in session.query(model).yield_per(100):
+                        domains.append({
+                            'name': d.name,
+                            'created': d.created,
+                            'expires': d.expires,
+                            'source': model.__tablename__
+                        })
+                except SQLAlchemyError as e:
+                    err_log.logger.error(f"Query failed for {model.__name__}: {str(e)}")
+                    continue
+    except Exception as e:
+        err_log.logger.error(f"Session error: {str(e)}")
+    return domains
+
+
 def update_metrics():
+    """线程安全的指标更新"""
     while True:
         try:
             data = fetch_domains()
 
-            domains_info.clear()
+            # 清除旧指标（线程安全）
+            DOMAIN_INFO.clear()
 
+            # 批量更新指标
             for item in data:
+                try:
+                    DOMAIN_INFO.labels(
+                        domain=item['name'],
+                        registrar=item['source'],
+                        created=item['created'].isoformat() if item['created'] else '',
+                        expires=item['expires'].isoformat() if item['expires'] else ''
+                    ).set(
+                        item['expires'].timestamp() if item['expires'] else 0
+                    )
+                except Exception as e:
+                    err_log.logger.error(f"Metric update failed for {item['name']}: {str(e)}")
 
-                domains_info.labels(
-                    domainName=item['name'],
-                    source=item['source'],
-                    domain_created_time=item['created'].strftime('%Y-%m-%d-%H:%M:%S') if item['created'] else None,
-                    domain_expires_time=item['expires'].strftime('%Y-%m-%d-%H:%M:%S') if item['expires'] else None,
-                ).set(item['expires'].timestamp() if item['expires'] else 0)
+            info_log.logger.info(f"Updated {len(data)} domains")
 
-            info_log.logger.info("Prometheus metrics updated.")
         except Exception as e:
-            err_log.logger.error(f"Error updating metrics: {e}")
-
-        time.sleep(3600)  # 每 30 秒更新一次
-
-# 启动 Prometheus 指标采集服务
-def start_prometheus_exporter():
-    start_http_server(10106)
-    info_log.logger.info("Prometheus exporter started on port 10106")
-    t = threading.Thread(target=update_metrics)
-    t.daemon = True
-    t.start()
+            err_log.logger.error(f"Fatal update error: {str(e)}")
+        finally:
+            time.sleep(3600)  # 1小时更新间隔
 
 
+def start_exporter():
+    """启动监控服务"""
+    try:
+        start_http_server(10106)
+        info_log.logger.info("Exporter started on port 10106")
+
+        # 启动更新线程
+        updater = threading.Thread(
+            target=update_metrics,
+            name="metrics-updater",
+            daemon=True
+        )
+        updater.start()
+
+        # 注册退出处理
+        atexit.register(shutdown_session)
+        return True
+    except Exception as e:
+        err_log.logger.error(f"Failed to start exporter: {str(e)}")
+        return False
