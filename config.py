@@ -1,5 +1,7 @@
 LOG_PATH = "/data/logs"
 APP_NAME = "domains_manage"
+PORT = 5000
+HOST = "0.0.0.0"
 
 # NameCheap config
 NAMECHEAP_API_KEY = "89db5ffd95f0495ba5f7277a6dcb0765"

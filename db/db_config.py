@@ -1,10 +1,24 @@
 from contextlib import contextmanager
-
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-DATABASE_URL = 'mysql+pymysql://domains_rw:%EyXkyI5fb53M0#psc@10.153.20.157:3306/domains?charset=utf8mb4'
+from Code.Python.API.domain_v2.config import DB_PORT
+
+if os.getenv('Env') == "test":
+    DB_HOST = "test.scmp.sgt.sg2.mysql"
+elif os.getenv('Env') == "prod":
+    DB_HOST = "prod.scmp.sgt.sg2.mysql"
+else:
+    print("Env is not set")
+    exit(1)
+    
+DB_PORT = 3306
+DB_USER = "domains_rw"
+DB_PASSWORD = "%EyXkyI5fb53M0#psc"
+DB_NAME = "domains"
+DATABASE_URL = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4'
 
 # 初始化数据库
 Base = declarative_base()

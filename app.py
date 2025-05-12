@@ -8,7 +8,7 @@ from db.namecom import Domain as Namecom
 from db.dynadot import Domain as Dynadot
 from db.namecheap import Domain as Namecheap
 from logs.logs import Logger
-from config import APP_NAME,LOG_PATH
+from config import APP_NAME,LOG_PATH,HOST,PORT
 from metrice import start_exporter
 
 
@@ -138,4 +138,4 @@ if __name__ == '__main__':
     err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
     configure_logging()
     start_exporter()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host=HOST, port=PORT, debug=False)
