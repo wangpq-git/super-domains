@@ -3,8 +3,13 @@ from datetime import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 
-from config import NAMECOM_CONFIG
+from config import NAMECOM_CONFIG,LOG_PATH,APP_NAME
 from db.namecom import Domain,session
+
+from logs.logs import Logger
+
+info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
+err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 
 def list_domains(username, token):
     url = 'https://api.name.com/v4/domains'
@@ -31,10 +36,10 @@ def list_domains(username, token):
             else:
                 session.add(domain)
         session.commit()
-        print(f"name.com [{username}] 账号，{len(domains)} 条记录已成功写入数据库。")
+        info_log.logger.info(f"name.com [{username}] 账号，{len(domains)} 条记录已成功写入数据库。")
     else:
-        print(f"请求失败，状态码: {response.status_code}")
-        print(response.text)
+        err_log.logger.error(f"请求失败，状态码: {response.status_code}")
+        err_log.logger.error(response.text)
 
 def main():
     configs = NAMECOM_CONFIG["config"]

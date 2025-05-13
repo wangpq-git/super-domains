@@ -3,8 +3,13 @@ from datetime import datetime
 import requests
 import xml.etree.ElementTree as ET
 
-from config import NAMECHEAP_API_KEY,NAMECHEAP_USERNAME
+from config import NAMECHEAP_API_KEY,NAMECHEAP_USERNAME,LOG_PATH,APP_NAME
 from db.namecheap import Domain,session
+from logs.logs import Logger
+
+info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
+err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
+
 
 def fetch_domains():
     url = "https://api.namecheap.com/xml.response"
@@ -26,7 +31,7 @@ def parse_and_store(xml_data):
     result = root.find('.//ns:DomainGetListResult', ns)
 
     if result is None:
-        print("No domain list found.")
+        err_log.logger.error("[NameCheap]: No domain list found.")
         return
 
     for domain in result.findall('ns:Domain', ns):
@@ -52,14 +57,14 @@ def parse_and_store(xml_data):
             session.add(domain_obj)
 
     session.commit()
-    print(f"NameCheap [{NAMECHEAP_USERNAME}] 账号，数据写入完成。")
+    info_log.logger.info(f"NameCheap [{NAMECHEAP_USERNAME}] 账号，数据写入完成。")
 
 def main():
     try:
         xml_data = fetch_domains()
         parse_and_store(xml_data)
     except Exception as e:
-        print(f"NameCheap Error: {e}")
+        err_log.logger.error(f"NameCheap Error: {e}")
 
 if __name__ == '__main__':
     main()

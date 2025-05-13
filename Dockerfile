@@ -8,5 +8,5 @@ RUN sudo chmod +x /data/code/run.sh    && \
 RUN pip3 install --no-cache-dir -r /data/code/requirements.txt
 
 WORKDIR /data/code/
-CMD ["/bin/bash","-c","bash /data/code/run.sh "]
+CMD ["/bin/bash","-c","bash /data/code/run.sh"]
 

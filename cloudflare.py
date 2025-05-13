@@ -1,6 +1,10 @@
 import requests
 from db.cloudflare import Domain,session
-from config import CF_CONFIG
+from config import CF_CONFIG,LOG_PATH,APP_NAME
+from logs.logs import Logger
+
+info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
+err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 
 def list_domains(account_id, email, api_key):
     # API 端点
@@ -50,10 +54,10 @@ def list_domains(account_id, email, api_key):
             else:
                 session.add(domain)
         session.commit()
-        print(f"CloudFlare [{email}] 账号，{len(zones)} 条记录已成功写入数据库。")
+        info_log.logger.info(f"CloudFlare [{email}] 账号，{len(zones)} 条记录已成功写入数据库。")
     else:
-        print(f"请求失败，状态码: {response.status_code}")
-        print(response.text)
+        err_log.logger.error(f"请求失败，状态码: {response.status_code}")
+        err_log.logger.error(response.text)
 
 
 def main():

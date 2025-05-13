@@ -1,9 +1,12 @@
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from config import DYNADOT_API_KEY
+from config import DYNADOT_API_KEY,LOG_PATH,APP_NAME
 from db.dynadot import Domain, session
+from logs.logs import Logger
 
+info_log = Logger(LOG_PATH + '/' + APP_NAME + '-info.log', level='info')
+err_log = Logger(LOG_PATH + '/' + APP_NAME + '-error.log', level='error')
 
 def parse_unix_timestamp(ms_str):
     try:
@@ -18,7 +21,7 @@ def parse_and_store(xml_data):
     domains = root.findall('.//Domain')
 
     if not domains:
-        print("No domain list found.")
+        err_log.logger.error("[Dynadot]: No domain list found.")
         return
 
     for domain in domains:
@@ -41,7 +44,7 @@ def parse_and_store(xml_data):
             session.add(domain_obj)
 
     session.commit()
-    print(f"Dynadot 账号数据写入完成！")
+    info_log.logger.info(f"Dynadot 账号数据写入完成！")
 
 
 def fetch_and_save_dynadot_domains():
