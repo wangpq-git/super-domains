@@ -67,8 +67,8 @@ def search_domain():
                     for d in domains
                 ]
     except Exception as e:
-        print(f"查询出错: {str(e)}")
-        return jsonify({"error": "Database query failed"}), 500
+        # print(f"查询出错: {str(e)}")
+        return jsonify({"error": "Database query failed", "info": f"{str(e)}"}), 500
     finally:
         session.close()
 
@@ -76,7 +76,7 @@ def search_domain():
     if results:
         return jsonify(results)
     else:
-        print("在所有表中均未找到匹配记录")
+        # print("在所有表中均未找到匹配记录")
         return jsonify({"message": "Domain not found in any table"}), 404
 
 @app.route('/sync', methods=['GET'])
@@ -100,7 +100,6 @@ def sync_data():
 
 @app.route('/', methods=['GET'])
 def health():
-    session = Session()
     try:
         return jsonify({"status": "healthy"})
     except Exception as e:
@@ -118,12 +117,26 @@ def configure_logging():
     for handler in list(werkzeug_logger.handlers):
         werkzeug_logger.removeHandler(handler)
 
-    # 添加自定义的日志处理器
-    flask_logger.addHandler(info_log.logger.handlers[0])  # 文件日志处理器
-    flask_logger.addHandler(info_log.logger.handlers[1])  # 屏幕日志处理器
+    # 获取 info_log 和 err_log 的处理器
+    # 假设 info_log.logger.handlers[0] 是文件处理器，handlers[1] 是屏幕处理器
+    info_file_handler = info_log.logger.handlers[0]
+    info_console_handler = info_log.logger.handlers[1]
 
-    werkzeug_logger.addHandler(info_log.logger.handlers[0])  # 文件日志处理器
-    werkzeug_logger.addHandler(info_log.logger.handlers[1])  # 屏幕日志处理器
+    # 假设 err_log.logger.handlers[0] 是 error 文件处理器
+    error_file_handler = err_log.logger.handlers[0]
+
+    # 配置 info 文件处理器（只记录 INFO 及以上，过滤 ERROR）
+    info_file_handler.setLevel(logging.INFO)
+    info_file_handler.addFilter(lambda record: record.levelno < logging.ERROR)
+
+    # 配置 error 文件处理器（只记录 ERROR 及以上）
+    error_file_handler.setLevel(logging.ERROR)
+
+    # 添加处理器
+    for logger in [flask_logger, werkzeug_logger]:
+        logger.addHandler(info_file_handler)  # info 文件日志
+        logger.addHandler(error_file_handler)  # error 文件日志
+        logger.addHandler(info_console_handler)  # 屏幕日志（保持原有）
 
     # 设置日志级别
     flask_logger.setLevel(logging.INFO)
