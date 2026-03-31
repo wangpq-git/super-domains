@@ -55,6 +55,8 @@
         v-loading="store.loading"
         :data="store.domains"
         stripe
+        size="small"
+        :row-style="{ height: '44px' }"
         style="width: 100%"
         @selection-change="handleSelectionChange"
       >
@@ -66,9 +68,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="account" label="账户" width="150" show-overflow-tooltip />
-        <el-table-column prop="expiry_date" label="到期日期" width="140">
+        <el-table-column prop="expiry_date" label="到期日期" width="120">
           <template #default="{ row }">
-            <span :class="expiryClass(row.expiry_date)">{{ row.expiry_date || '-' }}</span>
+            <span :class="expiryClass(row.expiry_date)">{{ formatDate(row.expiry_date) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -76,9 +78,21 @@
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="auto_renew" label="自动续费" width="100">
+        <el-table-column label="NS记录" min-width="200">
           <template #default="{ row }">
-            <el-switch v-model="row.auto_renew" disabled />
+            <div v-if="row.nameservers && row.nameservers.length" class="ns-list">
+              <el-tag v-for="ns in row.nameservers.slice(0, 2)" :key="ns" size="small" type="info" class="ns-tag">{{ ns }}</el-tag>
+              <el-tooltip v-if="row.nameservers.length > 2" :content="row.nameservers.join('\n')" placement="top" raw-content>
+                <el-tag size="small" type="info">+{{ row.nameservers.length - 2 }}</el-tag>
+              </el-tooltip>
+            </div>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="auto_renew" label="自动续费" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.auto_renew" type="success" size="small">开启</el-tag>
+            <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -176,21 +190,30 @@ function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger
 }
 
 function statusLabel(status: string): string {
-  const map: Record<string, string> = { active: '活跃', expired: '已过期', pending: '待续费' }
+  const map: Record<string, string> = { active: '正常', expired: '已过期', pending: '待处理', locked: '已锁定', removed: '已移除' }
   return map[status] ?? status
 }
 
 function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
-  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = { active: 'success', expired: 'danger', pending: 'warning' }
+  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = { active: 'success', expired: 'danger', pending: 'info', locked: 'warning', removed: 'info' }
   return map[status] ?? 'info'
+}
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return '-'
+  const d = new Date(dateStr)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function expiryClass(dateStr: string): string {
   if (!dateStr) return ''
   const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000)
   if (diff < 0) return 'expiry-expired'
-  if (diff < 7) return 'expiry-danger'
-  if (diff < 30) return 'expiry-warning'
+  if (diff <= 7) return 'expiry-danger'
+  if (diff <= 30) return 'expiry-warning'
   return 'expiry-safe'
 }
 
@@ -316,9 +339,12 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 .expiry-safe { color: #67c23a; }
-.expiry-warning { color: #e6a23c; }
+.expiry-warning { color: #e6a23c; font-weight: 600; }
 .expiry-danger { color: #f56c6c; font-weight: 600; }
-.expiry-expired { color: #909399; text-decoration: line-through; }
+.expiry-expired { color: #f56c6c; font-weight: 600; text-decoration: line-through; }
+.ns-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ns-tag { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.text-muted { color: #c0c4cc; }
 .pagination-wrapper {
   display: flex;
   justify-content: flex-end;

@@ -52,6 +52,14 @@ class NameComAdapter(BasePlatformAdapter):
         await self._request("GET", "/hello")
         return True
 
+    async def _get_domain_nameservers(self, domain_name: str) -> List[str]:
+        """Fetch nameservers from domain detail API."""
+        try:
+            resp = await self._request("GET", f"/domains/{domain_name}")
+            return resp.get("nameservers", [])
+        except Exception:
+            return []
+
     async def list_domains(self) -> List[DomainInfo]:
         domains = []
         page = 1
@@ -89,13 +97,14 @@ class NameComAdapter(BasePlatformAdapter):
                 if not expiry_date:
                     expiry_date = datetime.max.replace(tzinfo=None)
 
-                nameservers = domain_data.get("nameservers", [])
-
                 status = "active"
                 if domain_data.get("locked"):
                     status = "locked"
                 elif domain_data.get("autorenewEnabled"):
                     status = "auto_renew"
+
+                # Fetch nameservers from detail API
+                nameservers = await self._get_domain_nameservers(domain_name)
 
                 domains.append(DomainInfo(
                     name=domain_name,
