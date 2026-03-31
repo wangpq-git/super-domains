@@ -66,7 +66,7 @@ class NameComAdapter(BasePlatformAdapter):
 
             domain_list = response.get("domains", [])
             for domain_data in domain_list:
-                domain_name = domain_data.get("name", "")
+                domain_name = domain_data.get("domainName", "")
                 expiry_date = None
                 registration_date = None
 
@@ -78,10 +78,10 @@ class NameComAdapter(BasePlatformAdapter):
                     except Exception:
                         pass
 
-                if domain_data.get("registeredDate"):
+                if domain_data.get("createDate"):
                     try:
                         registration_date = datetime.strptime(
-                            domain_data["registeredDate"], "%Y-%m-%dT%H:%M:%SZ"
+                            domain_data["createDate"], "%Y-%m-%dT%H:%M:%SZ"
                         )
                     except Exception:
                         pass
@@ -94,7 +94,7 @@ class NameComAdapter(BasePlatformAdapter):
                 status = "active"
                 if domain_data.get("locked"):
                     status = "locked"
-                elif domain_data.get("autoRenew"):
+                elif domain_data.get("autorenewEnabled"):
                     status = "auto_renew"
 
                 domains.append(DomainInfo(
@@ -103,7 +103,7 @@ class NameComAdapter(BasePlatformAdapter):
                     status=status,
                     registration_date=registration_date,
                     expiry_date=expiry_date,
-                    auto_renew=domain_data.get("autoRenew", False),
+                    auto_renew=domain_data.get("autorenewEnabled", False),
                     locked=domain_data.get("locked", True),
                     whois_privacy=domain_data.get("whoisPrivacy", False),
                     nameservers=nameservers,
@@ -111,8 +111,8 @@ class NameComAdapter(BasePlatformAdapter):
                     raw_data=domain_data
                 ))
 
-            total_pages = response.get("totalPages", 1)
-            if page >= total_pages:
+            last_page = response.get("lastPage", 1)
+            if page >= last_page:
                 break
             page += 1
 
