@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  app:
+    build: ./backend
+    container_name: domain-manage-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-super-secret-key-change-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-encryption-key-change-in-production}
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend:/app
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+  celery-worker:
+    build: ./backend
+    container_name: domain-manage-celery-worker
+    command: celery -A app.core.celery_app worker -l info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-super-secret-key-change-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-encryption-key-change-in-production}
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend:/app
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+  celery-beat:
+    build: ./backend
+    container_name: domain-manage-celery-beat
+    command: celery -A app.core.celery_app beat -l info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend:/app
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: domain-manage-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    container_name: domain-manage-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=domain_manage
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: domain-manage-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - domain-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  domain-net:
+    driver: bridge

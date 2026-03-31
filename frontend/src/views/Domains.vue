@@ -1,0 +1,327 @@
+<template>
+  <div class="domains-container">
+    <el-card shadow="never" class="filter-card">
+      <el-form :inline="true" :model="store.filters" @submit.prevent>
+        <el-form-item label="平台">
+          <el-select v-model="store.filters.platform" placeholder="全部平台" clearable style="width: 160px" @change="handleFilter">
+            <el-option v-for="p in platforms" :key="p" :label="p" :value="p" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 120px" @change="handleFilter">
+            <el-option label="活跃" value="active" />
+            <el-option label="已过期" value="expired" />
+            <el-option label="待续费" value="pending" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="到期日期">
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 260px"
+            @change="handleDateChange"
+          />
+        </el-form-item>
+        <el-form-item label="搜索">
+          <el-input v-model="store.filters.search" placeholder="域名搜索" clearable style="width: 200px" @clear="handleFilter" @keyup.enter="handleFilter">
+            <template #append><el-button :icon="Search" @click="handleFilter" /></template>
+          </el-input>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" style="margin-top: 16px">
+      <div v-if="selectedDomains.length > 0" class="batch-bar">
+        <span class="batch-info">已选择 {{ selectedDomains.length }} 项</span>
+        <el-button type="primary" :loading="batchLoading" @click="handleBatchSync">批量同步</el-button>
+        <el-button type="warning" :loading="batchLoading" @click="showNsDialog = true">批量修改NS</el-button>
+        <el-button @click="clearSelection">取消选择</el-button>
+      </div>
+
+      <div class="export-bar">
+        <el-button :icon="Download" @click="handleExportCsv">导出CSV</el-button>
+        <el-button :icon="Download" @click="handleExportXlsx">导出Excel</el-button>
+      </div>
+
+      <el-table
+        ref="tableRef"
+        v-loading="store.loading"
+        :data="store.domains"
+        stripe
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="50" />
+        <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="platform" label="平台" width="130">
+          <template #default="{ row }">
+            <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="account" label="账户" width="150" show-overflow-tooltip />
+        <el-table-column prop="expiry_date" label="到期日期" width="140">
+          <template #default="{ row }">
+            <span :class="expiryClass(row.expiry_date)">{{ row.expiry_date || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="auto_renew" label="自动续费" width="100">
+          <template #default="{ row }">
+            <el-switch v-model="row.auto_renew" disabled />
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="pagination-wrapper">
+        <el-pagination
+          v-model:current-page="store.filters.page"
+          v-model:page-size="store.filters.page_size"
+          :total="store.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          @size-change="handleFilter"
+          @current-change="handleFilter"
+        />
+      </div>
+    </el-card>
+
+    <el-dialog v-model="showNsDialog" title="批量修改 Nameservers" width="500px">
+      <el-form label-width="100px">
+        <el-form-item v-for="(_, idx) in nsForm" :key="idx" :label="`NS${idx + 1}`">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-input v-model="nsForm[idx]" placeholder="ns1.example.com" />
+            <el-button v-if="nsForm.length > 2" :icon="Delete" type="danger" circle size="small" @click="removeNs(idx)" />
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="addNs">+ 添加 NS</el-button>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showNsDialog = false">取消</el-button>
+        <el-button type="primary" :loading="batchLoading" @click="handleBatchNs">确认</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { Search, Download, Delete } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import type { ElTable } from 'element-plus'
+import { useDomainsStore } from '@/stores/domains'
+import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
+
+interface DomainRow {
+  id: number
+  domain_name: string
+  platform: string
+  account: string
+  account_id: number
+  [key: string]: any
+}
+
+const store = useDomainsStore()
+const dateRange = ref<string[]>([])
+const tableRef = ref<InstanceType<typeof ElTable>>()
+const selectedDomains = ref<DomainRow[]>([])
+const batchLoading = ref(false)
+const showNsDialog = ref(false)
+const nsForm = reactive<string[]>(['', ''])
+
+const platforms = ['cloudflare', 'namecom', 'dynadot', 'godaddy', 'namecheap', 'namesilo', 'openprovider', 'porkbun', 'spaceship']
+
+function handleSelectionChange(rows: DomainRow[]) {
+  selectedDomains.value = rows
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+}
+
+function addNs() {
+  nsForm.push('')
+}
+
+function removeNs(idx: number) {
+  nsForm.splice(idx, 1)
+}
+
+function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+    cloudflare: 'warning',
+    namecom: 'success',
+    dynadot: '',
+    godaddy: 'success',
+    namecheap: 'danger',
+    namesilo: 'info',
+    openprovider: 'info',
+    porkbun: 'danger',
+    spaceship: 'info',
+  }
+  return map[platform] ?? ''
+}
+
+function statusLabel(status: string): string {
+  const map: Record<string, string> = { active: '活跃', expired: '已过期', pending: '待续费' }
+  return map[status] ?? status
+}
+
+function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = { active: 'success', expired: 'danger', pending: 'warning' }
+  return map[status] ?? 'info'
+}
+
+function expiryClass(dateStr: string): string {
+  if (!dateStr) return ''
+  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000)
+  if (diff < 0) return 'expiry-expired'
+  if (diff < 7) return 'expiry-danger'
+  if (diff < 30) return 'expiry-warning'
+  return 'expiry-safe'
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  window.URL.revokeObjectURL(url)
+}
+
+async function handleExportCsv() {
+  try {
+    const res = await exportDomainsCsv()
+    downloadBlob(res.data as Blob, 'domains.csv')
+    ElMessage.success('CSV导出成功')
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+async function handleExportXlsx() {
+  try {
+    const res = await exportDomainsXlsx()
+    downloadBlob(res.data as Blob, 'domains.xlsx')
+    ElMessage.success('Excel导出成功')
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+async function handleBatchSync() {
+  const accountIds = [...new Set(selectedDomains.value.map(d => d.account_id))]
+  if (!accountIds.length) {
+    ElMessage.warning('请选择域名')
+    return
+  }
+  batchLoading.value = true
+  try {
+    const res = await batchSyncAccounts(accountIds)
+    const results = (res.data as any).results || []
+    const success = results.filter((r: any) => r.status === 'syncing').length
+    const failed = results.filter((r: any) => r.status === 'error').length
+    ElMessage.success(`同步已触发：成功 ${success}，失败 ${failed}`)
+    clearSelection()
+  } catch {
+    ElMessage.error('批量同步失败')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchNs() {
+  const nameservers = nsForm.filter(ns => ns.trim())
+  if (nameservers.length < 2) {
+    ElMessage.warning('请至少填写2个Nameserver')
+    return
+  }
+  const domainIds = selectedDomains.value.map(d => d.id)
+  batchLoading.value = true
+  try {
+    const res = await batchUpdateNameservers(domainIds, nameservers)
+    const results = (res.data as any).results || []
+    const success = results.filter((r: any) => r.status === 'success').length
+    const failed = results.filter((r: any) => r.status === 'error').length
+    ElMessage.success(`NS修改完成：成功 ${success}，失败 ${failed}`)
+    showNsDialog.value = false
+    clearSelection()
+    store.fetchDomains()
+  } catch {
+    ElMessage.error('批量修改NS失败')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+function handleDateChange(val: string[] | null) {
+  store.filters.expiry_start = val?.[0] ?? ''
+  store.filters.expiry_end = val?.[1] ?? ''
+  store.filters.page = 1
+  store.fetchDomains()
+}
+
+function handleFilter() {
+  store.filters.page = 1
+  store.fetchDomains()
+}
+
+function handleReset() {
+  dateRange.value = []
+  store.resetFilters()
+  store.fetchDomains()
+}
+
+onMounted(() => {
+  store.fetchDomains()
+})
+</script>
+
+<style scoped>
+.domains-container {
+  max-width: 1200px;
+}
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #ecf5ff;
+  border-radius: 6px;
+}
+.batch-info {
+  font-size: 14px;
+  color: #409eff;
+  margin-right: 8px;
+}
+.export-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.expiry-safe { color: #67c23a; }
+.expiry-warning { color: #e6a23c; }
+.expiry-danger { color: #f56c6c; font-weight: 600; }
+.expiry-expired { color: #909399; text-decoration: line-through; }
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+</style>

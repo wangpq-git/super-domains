@@ -1,0 +1,63 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
+import MainLayout from '@/layouts/MainLayout.vue'
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/Login.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/',
+    component: MainLayout,
+    redirect: '/dashboard',
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: () => import('@/views/Dashboard.vue')
+      },
+      {
+        path: 'domains',
+        name: 'Domains',
+        component: () => import('@/views/Domains.vue')
+      },
+      {
+        path: 'accounts',
+        name: 'Accounts',
+        component: () => import('@/views/Accounts.vue')
+      },
+      {
+        path: 'dns',
+        name: 'DnsManage',
+        component: () => import('@/views/DnsManage.vue')
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/views/Settings.vue')
+      }
+    ]
+  }
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+})
+
+router.beforeEach((to, _from, next) => {
+  const token = localStorage.getItem('token')
+  if (to.meta.requiresAuth !== false && !token) {
+    next({ name: 'Login', query: { redirect: to.fullPath } })
+  } else if (to.name === 'Login' && token) {
+    next({ name: 'Dashboard' })
+  } else {
+    next()
+  }
+})
+
+export default router
