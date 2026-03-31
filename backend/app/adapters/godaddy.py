@@ -51,6 +51,14 @@ class GoDaddyAdapter(BasePlatformAdapter):
         await self._request("GET", "/domains?limit=1")
         return True
 
+    async def _get_domain_nameservers(self, domain_name: str) -> List[str]:
+        """Fetch nameservers from domain detail API."""
+        try:
+            resp = await self._request("GET", f"/domains/{domain_name}")
+            return resp.get("nameServers") or []
+        except Exception:
+            return []
+
     async def list_domains(self) -> List[DomainInfo]:
         domains = []
 
@@ -66,51 +74,59 @@ class GoDaddyAdapter(BasePlatformAdapter):
             return domains
 
         for domain_data in response:
-                domain_name = domain_data.get("domain", "")
-                expiry_date = None
-                registration_date = None
+            domain_name = domain_data.get("domain", "")
+            expiry_date = None
+            registration_date = None
 
-                if domain_data.get("expires"):
-                    try:
-                        raw = domain_data["expires"].replace("Z", "+00:00")
-                        expiry_date = datetime.fromisoformat(raw).replace(tzinfo=None)
-                    except Exception:
-                        pass
+            if domain_data.get("expires"):
+                try:
+                    raw = domain_data["expires"].replace("Z", "+00:00")
+                    expiry_date = datetime.fromisoformat(raw).replace(tzinfo=None)
+                except Exception:
+                    pass
 
-                if domain_data.get("createdAt"):
-                    try:
-                        raw = domain_data["createdAt"].replace("Z", "+00:00")
-                        registration_date = datetime.fromisoformat(raw).replace(tzinfo=None)
-                    except Exception:
-                        pass
+            if domain_data.get("createdAt"):
+                try:
+                    raw = domain_data["createdAt"].replace("Z", "+00:00")
+                    registration_date = datetime.fromisoformat(raw).replace(tzinfo=None)
+                except Exception:
+                    pass
 
-                if not expiry_date:
-                    expiry_date = datetime.max.replace(tzinfo=None)
+            if not expiry_date:
+                expiry_date = datetime.max.replace(tzinfo=None)
 
-                nameservers = domain_data.get("nameServers") or []
+            # Fetch nameservers from detail API
+            nameservers = await self._get_domain_nameservers(domain_name)
 
-                status_map = {
-                    "ACTIVE": "active",
-                    "EXPIRED": "expired",
-                    "GRACE": "grace",
-                    "REDEMPTION": "redemption",
-                    "PENDING_DELETE": "pending_delete"
-                }
-                status = status_map.get(domain_data.get("status"), "active")
+            # Map GoDaddy status + check expiry
+            status_map = {
+                "ACTIVE": "active",
+                "CANCELLED": "expired",
+                "EXPIRED": "expired",
+                "GRACE": "expired",
+                "REDEMPTION": "expired",
+                "PENDING_DELETE": "expired",
+                "PARKED": "active",
+            }
+            status = status_map.get(domain_data.get("status"), "active")
 
-                domains.append(DomainInfo(
-                    name=domain_name,
-                    tld=domain_name.split(".")[-1] if "." in domain_name else "",
-                    status=status,
-                    registration_date=registration_date,
-                    expiry_date=expiry_date,
-                    auto_renew=domain_data.get("renewAuto", False),
-                    locked=domain_data.get("locked", True),
-                    whois_privacy=False,
-                    nameservers=nameservers,
-                    external_id=domain_name,
-                    raw_data=domain_data
-                ))
+            # Override: if expiry_date is in the past, mark as expired
+            if expiry_date < datetime.utcnow():
+                status = "expired"
+
+            domains.append(DomainInfo(
+                name=domain_name,
+                tld=domain_name.split(".")[-1] if "." in domain_name else "",
+                status=status,
+                registration_date=registration_date,
+                expiry_date=expiry_date,
+                auto_renew=domain_data.get("renewAuto", False),
+                locked=domain_data.get("locked", True),
+                whois_privacy=False,
+                nameservers=nameservers,
+                external_id=domain_name,
+                raw_data=domain_data
+            ))
 
         return domains
 
