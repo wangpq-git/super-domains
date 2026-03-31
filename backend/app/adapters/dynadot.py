@@ -89,7 +89,7 @@ class DynadotAdapter(BasePlatformAdapter):
                     auto_renew=item.get("auto_renew", False),
                     locked=item.get("locked", False),
                     whois_privacy=item.get("whois_privacy", False),
-                    nameservers=item.get("nameservers", []),
+                    nameservers=item.get("nameservers") or [],
                     external_id=item.get("id", str(item.get("domain_id", ""))),
                     raw_data=item
                 ))

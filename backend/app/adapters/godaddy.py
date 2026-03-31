@@ -83,7 +83,7 @@ class GoDaddyAdapter(BasePlatformAdapter):
                 if not expiry_date:
                     expiry_date = datetime.max.replace(tzinfo=None)
 
-                nameservers = domain_data.get("nameServers", [])
+                nameservers = domain_data.get("nameServers") or []
 
                 status_map = {
                     "ACTIVE": "active",

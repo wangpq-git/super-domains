@@ -105,8 +105,8 @@
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
           background
-          @size-change="handleFilter"
-          @current-change="handleFilter"
+          @size-change="handleSizeChange"
+          @current-change="store.fetchDomains()"
         />
       </div>
     </el-card>
@@ -294,6 +294,11 @@ async function handleBatchNs() {
 function handleDateChange(val: string[] | null) {
   store.filters.expiry_start = val?.[0] ?? ''
   store.filters.expiry_end = val?.[1] ?? ''
+  store.filters.page = 1
+  store.fetchDomains()
+}
+
+function handleSizeChange() {
   store.filters.page = 1
   store.fetchDomains()
 }

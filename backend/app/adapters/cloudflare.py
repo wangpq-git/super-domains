@@ -99,7 +99,7 @@ class CloudflareAdapter(BasePlatformAdapter):
                 expiry_date = None
                 registration_date = None
                 auto_renew = False
-                nameservers = zone.get("name_servers", [])
+                nameservers = zone.get("name_servers") or []
 
                 try:
                     registrar_info = await self._request(

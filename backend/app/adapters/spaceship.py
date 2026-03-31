@@ -189,7 +189,7 @@ class SpaceshipAdapter(BasePlatformAdapter):
                     auto_renew=auto_renew,
                     locked=item.get("locked", False),
                     whois_privacy=item.get("whois_privacy", item.get("privacy", False)),
-                    nameservers=item.get("nameservers", []),
+                    nameservers=item.get("nameservers") or [],
                     external_id=item.get("id", item.get("domain_id", item.get("uuid"))),
                     raw_data=item
                 ))
