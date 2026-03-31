@@ -11,7 +11,7 @@ from app.models.platform_account import PlatformAccount
 from app.adapters import get_adapter
 from app.adapters.base import DnsRecordInfo
 from app.core.encryption import decrypt_credentials
-from app.services.dns_service import _get_domain
+from app.services.dns_service import _get_domain_with_account
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -48,7 +48,7 @@ async def batch_update_dns(
 ):
     results = []
     for domain_id in body.domain_ids:
-        domain = await _get_domain(db, domain_id)
+        domain = await _get_domain_with_account(db, domain_id)
         if not domain:
             results.append({"domain_id": domain_id, "status": "error", "message": "域名不存在"})
             continue

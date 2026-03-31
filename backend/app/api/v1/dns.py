@@ -29,6 +29,10 @@ async def sync_dns_records(domain_id: int, db: AsyncSession = Depends(get_db)):
         result = await dns_service.sync_dns_records(db, domain_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except RuntimeError as e:
+        return {"domain_id": domain_id, "upserted": 0, "removed": 0, "error": str(e)}
+    except Exception as e:
+        return {"domain_id": domain_id, "upserted": 0, "removed": 0, "error": str(e)}
     return result
 
 
