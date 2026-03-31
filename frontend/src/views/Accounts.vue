@@ -14,7 +14,7 @@
             <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="账户名称" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
         <el-table-column prop="last_sync_at" label="最后同步" width="180">
           <template #default="{ row }">{{ row.last_sync_at || '从未同步' }}</template>
@@ -121,7 +121,7 @@ function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger
 function openDialog(row?: any) {
   isEdit.value = !!row
   editId.value = row?.id ?? null
-  Object.assign(form, row ? { platform: row.platform, name: row.name, api_key: '', api_secret: '' } : { ...defaultForm })
+  Object.assign(form, row ? { platform: row.platform, name: row.account_name || row.name, api_key: '', api_secret: '' } : { ...defaultForm })
   dialogVisible.value = true
 }
 
@@ -130,13 +130,18 @@ async function handleSubmit() {
   submitting.value = true
   try {
     if (isEdit.value && editId.value) {
-      const payload: any = { name: form.name }
-      if (form.api_key) payload.api_key = form.api_key
-      if (form.api_secret) payload.api_secret = form.api_secret
+      const payload: any = { account_name: form.name }
+      if (form.api_key) {
+        const creds: any = { api_key: form.api_key }
+        if (form.api_secret) creds.api_secret = form.api_secret
+        payload.credentials = creds
+      }
       await updateAccount(editId.value, payload)
       ElMessage.success('更新成功')
     } else {
-      await createAccount({ platform: form.platform, name: form.name, api_key: form.api_key, api_secret: form.api_secret || undefined })
+      const credentials: any = { api_key: form.api_key }
+      if (form.api_secret) credentials.api_secret = form.api_secret
+      await createAccount({ platform: form.platform, account_name: form.name, credentials })
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false

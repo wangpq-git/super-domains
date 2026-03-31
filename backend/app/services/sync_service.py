@@ -22,6 +22,10 @@ async def sync_account(db: AsyncSession, account_id: int) -> dict:
     if not account:
         raise ValueError(f"Account {account_id} not found")
 
+    account.sync_status = "syncing"
+    account.sync_error = None
+    await db.commit()
+
     credentials = decrypt_credentials(account.credentials)
     adapter_cls = get_adapter(account.platform, credentials)
 

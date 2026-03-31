@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import httpx
 from .base import BasePlatformAdapter, DomainInfo, DnsRecordInfo
 from . import register_adapter
 import logging
@@ -100,7 +101,7 @@ class OpenproviderAdapter(BasePlatformAdapter):
             return all_domains
         except Exception as e:
             logger.error(f"Failed to list OpenProvider domains: {e}")
-            return []
+            raise
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
         """Parse OpenProvider domain list response defensively"""

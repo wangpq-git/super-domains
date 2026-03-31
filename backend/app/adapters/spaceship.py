@@ -133,7 +133,7 @@ class SpaceshipAdapter(BasePlatformAdapter):
             return all_domains
         except Exception as e:
             logger.error(f"Failed to list Spaceship domains: {e}")
-            return []
+            raise
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
         """Parse Spaceship domain list response defensively"""

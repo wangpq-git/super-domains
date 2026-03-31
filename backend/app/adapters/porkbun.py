@@ -28,20 +28,12 @@ class PorkbunAdapter(BasePlatformAdapter):
         async with self._rate_limiter:
             url = f"{self.BASE_URL}{path}"
 
-            payload = kwargs.pop("json", {})
-            if method == "POST" or method == "GET":
-                payload = {**self._get_base_payload(), **payload}
-
             if method == "POST":
-                if "json" in kwargs:
-                    kwargs["json"] = {**self._get_base_payload(), **kwargs.get("json", {})}
-                else:
-                    kwargs["json"] = self._get_base_payload()
+                payload = kwargs.pop("json", {})
+                kwargs["json"] = {**self._get_base_payload(), **payload}
             elif method == "GET":
-                if "params" in kwargs:
-                    kwargs["params"] = {**self._get_base_payload(), **kwargs.get("params", {})}
-                else:
-                    kwargs["params"] = self._get_base_payload()
+                params = kwargs.pop("params", {})
+                kwargs["params"] = {**self._get_base_payload(), **params}
 
             response = await self.client.request(method, url, **kwargs)
 

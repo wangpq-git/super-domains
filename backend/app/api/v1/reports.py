@@ -13,7 +13,7 @@ from app.schemas.report import (
     AuditLogResponse,
     AuditLogListResponse,
 )
-from app.services.auth_service import get_current_user
+from app.api.deps import get_current_user
 
 router = APIRouter()
 

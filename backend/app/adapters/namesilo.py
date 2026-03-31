@@ -84,31 +84,34 @@ class NamesiloAdapter(BasePlatformAdapter):
                 break
 
             for domain_elem in domain_elements:
-                domain_name_elem = domain_elem.find("domain")
-                if domain_name_elem is None or not domain_name_elem.text:
+                domain_name = domain_elem.text
+                if not domain_name:
                     continue
-                domain_name = domain_name_elem.text
 
-                expires_elem = domain_elem.find("expires")
-                expiry_date = None
-                if expires_elem is not None and expires_elem.text:
-                    try:
-                        expiry_date = datetime.strptime(expires_elem.text, "%Y-%m-%d")
-                    except Exception:
-                        pass
-
-                if not expiry_date:
-                    expiry_date = datetime.max.replace(tzinfo=None)
-
+                expiry_date = datetime.max.replace(tzinfo=None)
                 auto_renew = False
-                auto_renew_elem = domain_elem.find("autoRenew")
-                if auto_renew_elem is not None and auto_renew_elem.text:
-                    auto_renew = auto_renew_elem.text.lower() == "1"
-
                 locked = True
-                locked_elem = domain_elem.find("locked")
-                if locked_elem is not None and locked_elem.text:
-                    locked = locked_elem.text.lower() == "1"
+
+                try:
+                    info_root = await self._request("getDomainInfo", {"domain": domain_name})
+                    info_reply = info_root.find("reply")
+                    if info_reply is not None:
+                        expires_elem = info_reply.find("expires")
+                        if expires_elem is not None and expires_elem.text:
+                            try:
+                                expiry_date = datetime.strptime(expires_elem.text, "%Y-%m-%d")
+                            except Exception:
+                                pass
+
+                        auto_renew_elem = info_reply.find("auto_renew")
+                        if auto_renew_elem is not None and auto_renew_elem.text:
+                            auto_renew = auto_renew_elem.text.lower() in ("yes", "1", "true")
+
+                        locked_elem = info_reply.find("locked")
+                        if locked_elem is not None and locked_elem.text:
+                            locked = locked_elem.text.lower() in ("yes", "1", "true")
+                except Exception:
+                    pass
 
                 domains.append(DomainInfo(
                     name=domain_name,
@@ -121,12 +124,7 @@ class NamesiloAdapter(BasePlatformAdapter):
                     whois_privacy=False,
                     nameservers=[],
                     external_id=domain_name,
-                    raw_data={
-                        "domain": domain_name,
-                        "expires": expires_elem.text if expires_elem is not None else None,
-                        "autoRenew": auto_renew,
-                        "locked": locked
-                    }
+                    raw_data={"domain": domain_name}
                 ))
 
             if len(domain_elements) < limit:

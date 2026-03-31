@@ -18,6 +18,7 @@ api_router.include_router(platforms_router, prefix="/platforms", tags=["platform
 api_router.include_router(domains_router, prefix="/domains", tags=["domains"])
 api_router.include_router(dns_router, prefix="/dns", tags=["dns"])
 api_router.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
+api_router.include_router(transfers_router, prefix="/transfers", tags=["transfers"])
 api_router.include_router(batch_router, prefix="/batch", tags=["batch"])
 api_router.include_router(export_router, prefix="/export", tags=["export"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])

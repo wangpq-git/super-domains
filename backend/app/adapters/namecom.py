@@ -131,10 +131,7 @@ class NameComAdapter(BasePlatformAdapter):
             if name == "@":
                 name = domain
             elif name and not name.endswith(f".{domain}"):
-                if name == "@":
-                    name = domain
-                else:
-                    name = f"{name}.{domain}"
+                name = f"{name}.{domain}"
 
             ttl = record_data.get("ttl", 3600)
             if ttl == 0:

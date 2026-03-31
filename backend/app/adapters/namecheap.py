@@ -42,19 +42,13 @@ class NamecheapAdapter(BasePlatformAdapter):
             except Exception as e:
                 raise RuntimeError(f"Namecheap API XML parse error: {e}")
 
-            api_response = root.find("ApiResponse")
-            if api_response is not None:
-                errors = api_response.find(".//Error")
-                if errors is not None:
-                    error_msg = errors.text or "Unknown error"
+            status = root.get("Status", "")
+            if status == "ERROR":
+                errors = root.findall(".//Errors/Error")
+                if errors:
+                    error_msg = "; ".join([err.text or "Unknown error" for err in errors])
                     raise RuntimeError(f"Namecheap API error: {error_msg}")
-
-                errors_list = api_response.findall(".//Errors")
-                for err_elem in errors_list:
-                    error_items = err_elem.findall(".//Error")
-                    for err in error_items:
-                        error_msg = err.text or "Unknown error"
-                        raise RuntimeError(f"Namecheap API error: {error_msg}")
+                raise RuntimeError("Namecheap API error: Unknown error")
 
             return root
 
@@ -134,13 +128,17 @@ class NamecheapAdapter(BasePlatformAdapter):
                     }
                 ))
 
-            total_pages = result.get("TotalPages", "1")
-            try:
-                total_pages_int = int(total_pages)
-            except Exception:
-                total_pages_int = 1
+            paging = root.find(".//Paging")
+            total_items = 0
+            if paging is not None:
+                total_elem = paging.find("TotalItems")
+                if total_elem is not None and total_elem.text:
+                    try:
+                        total_items = int(total_elem.text)
+                    except Exception:
+                        pass
 
-            if page >= total_pages_int or len(domain_elements) < page_size:
+            if len(domain_elements) < page_size or (total_items > 0 and page * page_size >= total_items):
                 break
             page += 1
 
@@ -254,21 +252,18 @@ class NamecheapAdapter(BasePlatformAdapter):
         }
 
         for i, host in enumerate(hosts_data):
-            for key, value in host.items():
-                params[f"HostName{i+1}"] = host.get("Hostname", "")
-                params[f"RecordType{i+1}"] = host.get("RecordType", "")
-                params[f"Address{i+1}"] = host.get("Address", "")
-                params[f"TTL{i+1}"] = host.get("TTL", "3600")
-                if host.get("MXPref"):
-                    params[f"MXPref{i+1}"] = host.get("MXPref")
-                if host.get("Protocol"):
-                    params[f"Protocol{i+1}"] = host.get("Protocol")
-                if host.get("Port"):
-                    params[f"Port{i+1}"] = host.get("Port")
-                if host.get("Weight"):
-                    params[f"Weight{i+1}"] = host.get("Weight")
-
-        params["HostNameCount"] = str(len(hosts_data))
+            params[f"HostName{i+1}"] = host.get("Hostname", "")
+            params[f"RecordType{i+1}"] = host.get("RecordType", "")
+            params[f"Address{i+1}"] = host.get("Address", "")
+            params[f"TTL{i+1}"] = host.get("TTL", "3600")
+            if host.get("MXPref"):
+                params[f"MXPref{i+1}"] = host.get("MXPref")
+            if host.get("Protocol"):
+                params[f"Protocol{i+1}"] = host.get("Protocol")
+            if host.get("Port"):
+                params[f"Port{i+1}"] = host.get("Port")
+            if host.get("Weight"):
+                params[f"Weight{i+1}"] = host.get("Weight")
 
         await self._request(params)
 

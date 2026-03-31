@@ -104,7 +104,7 @@ class CloudflareAdapter(BasePlatformAdapter):
                 try:
                     registrar_info = await self._request(
                         "GET",
-                        f"/zones/{zone_id}/registrar"
+                        f"/zones/{zone_id}/registrar/domains/{domain_name}"
                     )
                     registrar_data = registrar_info.get("result", {})
                     if registrar_data:

@@ -106,4 +106,8 @@ async def sync_account(account_id: int, db: AsyncSession = Depends(get_db)):
     account.sync_status = "syncing"
     account.sync_error = None
     await db.commit()
+
+    from app.tasks.sync_tasks import sync_account_task
+    sync_account_task.delay(account_id)
+
     return {"message": "Sync triggered", "sync_status": "syncing"}

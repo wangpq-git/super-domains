@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, Text, Integer, ForeignKey, func
+from sqlalchemy import String, Boolean, Text, Integer, ForeignKey, func, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -18,7 +18,7 @@ class DnsRecord(Base):
     proxied: Mapped[bool] = mapped_column(Boolean, nullable=True)
     external_id: Mapped[str] = mapped_column(String(128), nullable=True)
     sync_status: Mapped[str] = mapped_column(String(20), default="synced")
-    raw_data: Mapped[dict] = mapped_column(default=dict)
+    raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 

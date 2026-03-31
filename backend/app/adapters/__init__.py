@@ -16,3 +16,15 @@ def get_adapter(platform: str, credentials: dict) -> BasePlatformAdapter:
     if not cls:
         raise ValueError(f"Unsupported platform: {platform}")
     return cls(credentials)
+
+
+# Auto-import all adapters to trigger @register_adapter decorators
+from . import cloudflare  # noqa: F401,E402
+from . import namecom  # noqa: F401,E402
+from . import godaddy  # noqa: F401,E402
+from . import namecheap  # noqa: F401,E402
+from . import porkbun  # noqa: F401,E402
+from . import namesilo  # noqa: F401,E402
+from . import dynadot  # noqa: F401,E402
+from . import openprovider  # noqa: F401,E402
+from . import spaceship  # noqa: F401,E402

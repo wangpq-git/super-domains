@@ -34,17 +34,13 @@ class DynadotAdapter(BasePlatformAdapter):
 
     async def list_domains(self) -> List[DomainInfo]:
         """List all domains"""
-        try:
-            response = await self.client.get(
-                f"{self.BASE_URL}/list_domain",
-                params={"key": self.api_key}
-            )
-            response.raise_for_status()
-            data = response.json()
-            return self._parse_domain_list(data)
-        except Exception as e:
-            logger.error(f"Failed to list Dynadot domains: {e}")
-            return []
+        response = await self.client.get(
+            f"{self.BASE_URL}/list_domain",
+            params={"key": self.api_key}
+        )
+        response.raise_for_status()
+        data = response.json()
+        return self._parse_domain_list(data)
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
         """Parse Dynadot domain list response defensively"""

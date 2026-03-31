@@ -30,6 +30,10 @@
           <el-icon><Setting /></el-icon>
           <template #title>DNS管理</template>
         </el-menu-item>
+        <el-menu-item index="/transfers">
+          <el-icon><Sort /></el-icon>
+          <template #title>域名转移</template>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Tools /></el-icon>
           <template #title>系统设置</template>
@@ -95,6 +99,7 @@ const titleMap: Record<string, string> = {
   '/domains': '域名管理',
   '/accounts': '账户管理',
   '/dns': 'DNS管理',
+  '/transfers': '域名转移',
   '/settings': '系统设置',
 }
 

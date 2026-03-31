@@ -2,20 +2,20 @@ import request from './request'
 
 export interface AccountData {
   platform: string
-  name: string
-  api_key: string
-  api_secret?: string
+  account_name: string
+  credentials: Record<string, string>
+  config?: Record<string, any>
 }
 
 export function getAccounts() {
   return request.get('/platforms')
 }
 
-export function createAccount(data: AccountData) {
+export function createAccount(data: any) {
   return request.post('/platforms', data)
 }
 
-export function updateAccount(id: number, data: Partial<AccountData>) {
+export function updateAccount(id: number, data: any) {
   return request.put(`/platforms/${id}`, data)
 }
 

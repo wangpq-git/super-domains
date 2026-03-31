@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, Text, Integer, ForeignKey, Index, UniqueConstraint, func
+from sqlalchemy import String, Boolean, Text, Integer, ForeignKey, Index, UniqueConstraint, func, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -23,8 +23,8 @@ class Domain(Base):
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False)
     locked: Mapped[bool] = mapped_column(Boolean, default=True)
     whois_privacy: Mapped[bool] = mapped_column(Boolean, default=False)
-    nameservers: Mapped[dict] = mapped_column(default=list)
-    raw_data: Mapped[dict] = mapped_column(default=dict)
+    nameservers: Mapped[dict] = mapped_column(JSON, default=list)
+    raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
     external_id: Mapped[str] = mapped_column(String(100), nullable=True)
     last_synced_at: Mapped[datetime] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

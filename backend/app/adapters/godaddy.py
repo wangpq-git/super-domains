@@ -24,7 +24,7 @@ class GoDaddyAdapter(BasePlatformAdapter):
             "Content-Type": "application/json"
         }
 
-    async def _request(self, method: str, path: str, **kwargs) -> dict:
+    async def _request(self, method: str, path: str, **kwargs) -> Any:
         async with self._rate_limiter:
             url = f"{self.BASE_URL}{path}"
             headers = self._get_headers()
@@ -190,12 +190,9 @@ class GoDaddyAdapter(BasePlatformAdapter):
         if record.priority is not None:
             payload["priority"] = record.priority
 
-        record_type = record.record_type
-        record_name = name if name != domain else "@"
-
         await self._request(
             "PUT",
-            f"/domains/{domain}/records/{record_type}/{record_name}",
+            f"/domains/{domain}/records/{record.record_type}/{name}",
             json=[payload]
         )
 
