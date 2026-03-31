@@ -103,11 +103,27 @@ async def sync_account(account_id: int, db: AsyncSession = Depends(get_db)):
     account = await platform_service.get_account(db, account_id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    account.sync_status = "syncing"
-    account.sync_error = None
-    await db.commit()
 
-    from app.tasks.sync_tasks import sync_account_task
-    sync_account_task.delay(account_id)
+    from app.services.sync_service import sync_account as do_sync
 
-    return {"message": "Sync triggered", "sync_status": "syncing"}
+    try:
+        result = await do_sync(db, account_id)
+        return {"synced": result.get("upserted", 0), "status": "success"}
+    except Exception as e:
+        await db.refresh(account)
+        return {"synced": 0, "status": "failed", "error": str(e)}
+
+
+@router.post("/sync-all")
+async def sync_all_accounts(db: AsyncSession = Depends(get_db)):
+    from app.services.sync_service import sync_all_accounts as do_sync_all
+
+    results = await do_sync_all(db)
+    success_count = sum(1 for r in results if "error" not in r)
+    failed_count = len(results) - success_count
+    return {
+        "total": len(results),
+        "success": success_count,
+        "failed": failed_count,
+        "results": results,
+    }

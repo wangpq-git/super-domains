@@ -30,3 +30,7 @@ export function testAccount(id: number) {
 export function syncAccount(id: number) {
   return request.post(`/platforms/${id}/sync`)
 }
+
+export function syncAllAccounts() {
+  return request.post('/platforms/sync-all')
+}

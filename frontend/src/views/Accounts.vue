@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span>平台账户管理</span>
-          <el-button type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
+          <div>
+            <el-button type="success" :icon="Refresh" :loading="syncingAll" @click="handleSyncAll">一键同步所有</el-button>
+            <el-button type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
+          </div>
         </div>
       </template>
 
@@ -52,11 +55,11 @@
         <el-form-item label="账户名称" prop="name">
           <el-input v-model="form.name" placeholder="输入账户名称" />
         </el-form-item>
-        <el-form-item label="API Key" prop="api_key">
-          <el-input v-model="form.api_key" placeholder="输入API Key" show-password />
+        <el-form-item v-for="field in currentCredentialFields" :key="field.key" :label="field.label" :prop="'credentials.' + field.key" :rules="field.required ? [{required: true, message: `请输入${field.label}`, trigger: 'blur'}] : []">
+          <el-input v-model="form.credentials[field.key]" :placeholder="field.placeholder" :type="field.type || 'text'" show-password />
         </el-form-item>
-        <el-form-item label="API Secret" prop="api_secret">
-          <el-input v-model="form.api_secret" placeholder="输入API Secret（可选）" show-password />
+        <el-form-item v-if="isEdit">
+          <el-alert type="info" :closable="false" description="留空表示不修改已有凭证" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -68,12 +71,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus, Edit, Delete, Refresh, Connection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { useAccountsStore } from '@/stores/accounts'
-import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount } from '@/api/accounts'
+import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts } from '@/api/accounts'
 
 const store = useAccountsStore()
 const formRef = ref<FormInstance>()
@@ -81,6 +84,7 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editId = ref<number | null>(null)
 const submitting = ref(false)
+const syncingAll = ref(false)
 
 const platforms = [
   { value: 'cloudflare', label: 'Cloudflare' },
@@ -94,13 +98,54 @@ const platforms = [
   { value: 'spaceship', label: 'Spaceship' },
 ]
 
-const defaultForm = { platform: '', name: '', api_key: '', api_secret: '' }
-const form = reactive({ ...defaultForm })
+const platformCredentialFields: Record<string, Array<{key: string, label: string, placeholder: string, required: boolean, type?: string}>> = {
+  cloudflare: [
+    { key: 'api_token', label: 'API Token', placeholder: '输入 Cloudflare API Token', required: true },
+    { key: 'email', label: 'Email (可选)', placeholder: '使用 Global Key 时需要填写', required: false },
+  ],
+  namecom: [
+    { key: 'username', label: '用户名', placeholder: '输入 Name.com 用户名', required: true },
+    { key: 'api_token', label: 'API Token', placeholder: '输入 API Token', required: true },
+  ],
+  godaddy: [
+    { key: 'api_key', label: 'API Key', placeholder: '输入 GoDaddy API Key', required: true },
+    { key: 'api_secret', label: 'API Secret', placeholder: '输入 API Secret', required: true },
+  ],
+  namecheap: [
+    { key: 'username', label: '用户名', placeholder: '输入 Namecheap 用户名', required: true },
+    { key: 'api_key', label: 'API Key', placeholder: '输入 API Key', required: true },
+    { key: 'client_ip', label: '白名单 IP', placeholder: '服务器出口 IP', required: true },
+  ],
+  porkbun: [
+    { key: 'api_key', label: 'API Key', placeholder: '输入 Porkbun API Key', required: true },
+    { key: 'secret_key', label: 'Secret Key', placeholder: '输入 Secret Key', required: true },
+  ],
+  namesilo: [
+    { key: 'api_key', label: 'API Key', placeholder: '输入 NameSilo API Key', required: true },
+  ],
+  dynadot: [
+    { key: 'api_key', label: 'API Key', placeholder: '输入 Dynadot API Key', required: true },
+  ],
+  openprovider: [
+    { key: 'username', label: '用户名', placeholder: '输入 OpenProvider 用户名', required: true },
+    { key: 'password', label: '密码', placeholder: '输入密码', required: true, type: 'password' },
+  ],
+  spaceship: [
+    { key: 'api_key', label: 'API Key', placeholder: '输入 Spaceship API Key', required: true },
+    { key: 'api_secret', label: 'API Secret', placeholder: '输入 API Secret', required: true },
+  ],
+}
+
+const defaultForm = { platform: '', name: '', credentials: {} as Record<string, string> }
+const form = reactive({ ...defaultForm, credentials: {} as Record<string, string> })
+
+const currentCredentialFields = computed(() => {
+  return form.platform ? (platformCredentialFields[form.platform] || []) : []
+})
 
 const rules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   name: [{ required: true, message: '请输入账户名称', trigger: 'blur' }],
-  api_key: [{ required: true, message: '请输入API Key', trigger: 'blur' }],
 }
 
 function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger' | 'info' {
@@ -121,7 +166,8 @@ function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger
 function openDialog(row?: any) {
   isEdit.value = !!row
   editId.value = row?.id ?? null
-  Object.assign(form, row ? { platform: row.platform, name: row.account_name || row.name, api_key: '', api_secret: '' } : { ...defaultForm })
+  form.credentials = {}
+  Object.assign(form, row ? { platform: row.platform, name: row.account_name || row.name } : { ...defaultForm, credentials: {} })
   dialogVisible.value = true
 }
 
@@ -129,19 +175,19 @@ async function handleSubmit() {
   await formRef.value?.validate()
   submitting.value = true
   try {
+    const filledCredentials: Record<string, string> = {}
+    for (const [k, v] of Object.entries(form.credentials)) {
+      if (v) filledCredentials[k] = v
+    }
     if (isEdit.value && editId.value) {
       const payload: any = { account_name: form.name }
-      if (form.api_key) {
-        const creds: any = { api_key: form.api_key }
-        if (form.api_secret) creds.api_secret = form.api_secret
-        payload.credentials = creds
+      if (Object.keys(filledCredentials).length > 0) {
+        payload.credentials = filledCredentials
       }
       await updateAccount(editId.value, payload)
       ElMessage.success('更新成功')
     } else {
-      const credentials: any = { api_key: form.api_key }
-      if (form.api_secret) credentials.api_secret = form.api_secret
-      await createAccount({ platform: form.platform, account_name: form.name, credentials })
+      await createAccount({ platform: form.platform, account_name: form.name, credentials: filledCredentials })
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
@@ -165,11 +211,27 @@ async function handleTest(row: any) {
 async function handleSync(row: any) {
   try {
     ElMessage.info('开始同步...')
-    await syncAccount(row.id)
-    ElMessage.success('同步完成')
+    const { data } = await syncAccount(row.id)
+    const count = data.domain_count ?? data.domains?.length ?? 0
+    ElMessage.success(`同步完成，共 ${count} 个域名`)
     store.fetchAccounts()
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '同步失败')
+  }
+}
+
+async function handleSyncAll() {
+  syncingAll.value = true
+  try {
+    const { data } = await syncAllAccounts()
+    const success = data.results?.filter((r: any) => r.status === 'success').length ?? 0
+    const failed = data.results?.filter((r: any) => r.status === 'failed').length ?? 0
+    ElMessage.success(`同步完成: ${success} 成功, ${failed} 失败`)
+    store.fetchAccounts()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || '同步失败')
+  } finally {
+    syncingAll.value = false
   }
 }
 
