@@ -53,32 +53,36 @@ class GoDaddyAdapter(BasePlatformAdapter):
 
     async def list_domains(self) -> List[DomainInfo]:
         domains = []
-        page = 1
-        limit = 100
 
-        while True:
-            response = await self._request(
-                "GET",
-                "/domains",
-                params={"limit": limit, "offset": (page - 1) * limit}
-            )
+        # GoDaddy API does not support offset-based pagination properly.
+        # Use a single request with large limit to fetch all domains.
+        response = await self._request(
+            "GET",
+            "/domains",
+            params={"limit": 1000}
+        )
 
-            if not isinstance(response, list):
-                break
+        if not isinstance(response, list):
+            return domains
 
-            for domain_data in response:
+        for domain_data in response:
                 domain_name = domain_data.get("domain", "")
                 expiry_date = None
                 registration_date = None
 
                 if domain_data.get("expires"):
                     try:
-                        expiry_date = datetime.fromisoformat(domain_data["expires"])
+                        raw = domain_data["expires"].replace("Z", "+00:00")
+                        expiry_date = datetime.fromisoformat(raw).replace(tzinfo=None)
                     except Exception:
                         pass
 
-                if domain_data.get("purchasePrice") and "year" in domain_data:
-                    pass
+                if domain_data.get("createdAt"):
+                    try:
+                        raw = domain_data["createdAt"].replace("Z", "+00:00")
+                        registration_date = datetime.fromisoformat(raw).replace(tzinfo=None)
+                    except Exception:
+                        pass
 
                 if not expiry_date:
                     expiry_date = datetime.max.replace(tzinfo=None)
@@ -107,10 +111,6 @@ class GoDaddyAdapter(BasePlatformAdapter):
                     external_id=domain_name,
                     raw_data=domain_data
                 ))
-
-            if len(response) < limit:
-                break
-            page += 1
 
         return domains
 
