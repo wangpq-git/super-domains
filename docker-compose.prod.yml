@@ -2,19 +2,7 @@ services:
   app:
     image: ghcr.io/wangpq-git/super-domains/backend:latest
     container_name: sdm-api
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - LDAP_ENABLED=${LDAP_ENABLED:-true}
-      - LDAP_HOST=${LDAP_HOST:-ldap.adsconflux.xyz}
-      - LDAP_PORT=${LDAP_PORT:-389}
-      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
-      - LDAP_BASE_DN=${LDAP_BASE_DN:-ou=users,dc=adsconflux,dc=xyz}
-      - LDAP_BIND_DN=${LDAP_BIND_DN:-cn=read,dc=adsconflux,dc=xyz}
-      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
-      - LDAP_USER_FILTER=${LDAP_USER_FILTER:-(uid={username})}
+    env_file: .env
     depends_on:
       - db
       - redis
@@ -26,19 +14,7 @@ services:
     image: ghcr.io/wangpq-git/super-domains/backend:latest
     container_name: sdm-celery-worker
     command: celery -A app.core.celery_app worker -l info
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - LDAP_ENABLED=${LDAP_ENABLED:-true}
-      - LDAP_HOST=${LDAP_HOST:-ldap.adsconflux.xyz}
-      - LDAP_PORT=${LDAP_PORT:-389}
-      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
-      - LDAP_BASE_DN=${LDAP_BASE_DN:-ou=users,dc=adsconflux,dc=xyz}
-      - LDAP_BIND_DN=${LDAP_BIND_DN:-cn=read,dc=adsconflux,dc=xyz}
-      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
-      - LDAP_USER_FILTER=${LDAP_USER_FILTER:-(uid={username})}
+    env_file: .env
     depends_on:
       - db
       - redis
@@ -50,9 +26,7 @@ services:
     image: ghcr.io/wangpq-git/super-domains/backend:latest
     container_name: sdm-celery-beat
     command: celery -A app.core.celery_app beat -l info
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
-      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
     depends_on:
       - db
       - redis
@@ -74,6 +48,7 @@ services:
   db:
     image: postgres:15-alpine
     container_name: sdm-db
+    env_file: .env
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
