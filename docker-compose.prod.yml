@@ -7,6 +7,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - LDAP_ENABLED=${LDAP_ENABLED:-true}
+      - LDAP_HOST=${LDAP_HOST:-ldap.adsconflux.xyz}
+      - LDAP_PORT=${LDAP_PORT:-389}
+      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
+      - LDAP_BASE_DN=${LDAP_BASE_DN:-ou=users,dc=adsconflux,dc=xyz}
+      - LDAP_BIND_DN=${LDAP_BIND_DN:-cn=read,dc=adsconflux,dc=xyz}
+      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
+      - LDAP_USER_FILTER=${LDAP_USER_FILTER:-(uid={username})}
     depends_on:
       - db
       - redis
@@ -23,6 +31,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - LDAP_ENABLED=${LDAP_ENABLED:-true}
+      - LDAP_HOST=${LDAP_HOST:-ldap.adsconflux.xyz}
+      - LDAP_PORT=${LDAP_PORT:-389}
+      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
+      - LDAP_BASE_DN=${LDAP_BASE_DN:-ou=users,dc=adsconflux,dc=xyz}
+      - LDAP_BIND_DN=${LDAP_BIND_DN:-cn=read,dc=adsconflux,dc=xyz}
+      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
+      - LDAP_USER_FILTER=${LDAP_USER_FILTER:-(uid={username})}
     depends_on:
       - db
       - redis
