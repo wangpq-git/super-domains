@@ -19,6 +19,7 @@ class AlertRule(Base):
     specific_platforms: Mapped[dict] = mapped_column(JSON, nullable=True)
     specific_domains: Mapped[dict] = mapped_column(JSON, nullable=True)
     excluded_platforms: Mapped[list] = mapped_column(JSON, default=list)
+    severity: Mapped[str] = mapped_column(String(16), default="warning")
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 

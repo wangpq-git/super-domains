@@ -80,59 +80,46 @@ async def send_wechat(webhook_url: str, content: str) -> bool:
     return await send_webhook(webhook_url, payload)
 
 
-async def send_feishu(webhook_url: str, title: str, domains: list[dict]) -> bool:
-    """发送飞书机器人消息（卡片+表格格式）"""
-    # 按剩余天数分组：紧急(<=3天)、警告(<=7天)、提醒(>7天)
-    urgent = [d for d in domains if d["days_left"] <= 3]
-    warning = [d for d in domains if 3 < d["days_left"] <= 7]
-    normal = [d for d in domains if d["days_left"] > 7]
+FEISHU_SEVERITY_MAP = {
+    "urgent": {"icon": "🔴", "label": "紧急", "color": "red"},
+    "warning": {"icon": "🟡", "label": "警告", "color": "orange"},
+    "info": {"icon": "🟢", "label": "提醒", "color": "green"},
+}
 
-    elements = []
 
-    def _add_group(label: str, color: str, items: list[dict]):
-        if not items:
-            return
-        lines = [f"**{label}**（{len(items)} 个）"]
-        for d in items:
-            lines.append(
-                f"• {d['domain_name']}　`{d['platform'] or '-'}`　"
-                f"{d['expiry_date'].strftime('%m-%d')}　**{d['days_left']}天**"
-            )
-        elements.append({
-            "tag": "column_set",
-            "columns": [{
-                "tag": "column",
-                "width": "weighted",
-                "weight": 1,
-                "elements": [{"tag": "markdown", "content": "\n".join(lines)}]
-            }]
-        })
-        elements.append({"tag": "hr"})
+async def send_feishu(webhook_url: str, title: str, domains: list[dict], severity: str = "warning") -> bool:
+    """发送飞书机器人消息（卡片格式，按告警等级显示颜色）"""
+    sev = FEISHU_SEVERITY_MAP.get(severity, FEISHU_SEVERITY_MAP["warning"])
 
-    _add_group("🔴 紧急（≤3天）", "red", urgent)
-    _add_group("🟡 警告（4-7天）", "orange", warning)
-    _add_group("🟢 提醒（>7天）", "green", normal)
+    lines = [f"**{sev['icon']} {sev['label']}** · 共 **{len(domains)}** 个域名"]
+    lines.append("")
+    for d in domains:
+        days = d["days_left"]
+        if days <= 3:
+            days_text = f"**🔥 {days}天**"
+        elif days <= 7:
+            days_text = f"**⚠️ {days}天**"
+        else:
+            days_text = f"{days}天"
+        lines.append(
+            f"• {d['domain_name']}　`{d['platform'] or '-'}`　"
+            f"{d['expiry_date'].strftime('%m-%d')}　{days_text}"
+        )
 
-    # 底部统计
-    elements.append({
-        "tag": "note",
-        "elements": [{"tag": "plain_text", "content": f"共 {len(domains)} 个域名即将到期 | 域名管理平台"}]
-    })
-
-    # 根据紧急程度选卡片头颜色
-    if urgent:
-        header_color = "red"
-    elif warning:
-        header_color = "orange"
-    else:
-        header_color = "yellow"
+    elements = [
+        {"tag": "markdown", "content": "\n".join(lines)},
+        {"tag": "hr"},
+        {"tag": "note", "elements": [
+            {"tag": "plain_text", "content": f"域名管理平台 · {severity.upper()}"}
+        ]},
+    ]
 
     payload = {
         "msg_type": "interactive",
         "card": {
             "header": {
                 "title": {"tag": "plain_text", "content": title},
-                "template": header_color
+                "template": sev["color"]
             },
             "elements": elements
         }

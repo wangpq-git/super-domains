@@ -21,6 +21,13 @@
         <el-table-column prop="days_before" label="提前天数" width="100" align="center">
           <template #default="{ row }">{{ row.days_before ?? '-' }}</template>
         </el-table-column>
+        <el-table-column prop="severity" label="等级" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.severity === 'urgent'" type="danger" size="small">🔴 紧急</el-tag>
+            <el-tag v-else-if="row.severity === 'warning'" type="warning" size="small">🟡 警告</el-tag>
+            <el-tag v-else type="success" size="small">🟢 提醒</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="channels" label="通知渠道" width="200">
           <template #default="{ row }">
             <el-tag v-for="ch in (row.channels ?? [])" :key="ch" size="small" style="margin-right: 4px">{{ channelLabel(ch) }}</el-tag>
@@ -96,6 +103,13 @@
         </el-form-item>
         <el-form-item label="提前天数" prop="days_before">
           <el-input-number v-model="form.days_before" :min="1" :max="365" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="告警等级">
+          <el-radio-group v-model="form.severity">
+            <el-radio-button value="urgent"><span style="color: #f56c6c">🔴 紧急</span></el-radio-button>
+            <el-radio-button value="warning"><span style="color: #e6a23c">🟡 警告</span></el-radio-button>
+            <el-radio-button value="info"><span style="color: #67c23a">🟢 提醒</span></el-radio-button>
+          </el-radio-group>
         </el-form-item>
         <el-form-item label="通知渠道" prop="channels">
           <el-checkbox-group v-model="form.channels">
@@ -178,6 +192,7 @@ const defaultForm = {
   apply_to_all: true,
   specific_platforms: [] as string[],
   excluded_platforms: [] as string[],
+  severity: 'warning' as string,
 }
 
 const form = reactive({ ...defaultForm })
@@ -273,6 +288,7 @@ function openDialog(row?: AlertRule) {
     form.apply_to_all = row.apply_to_all ?? true
     form.specific_platforms = [...(row.specific_platforms ?? [])]
     form.excluded_platforms = [...(row.excluded_platforms ?? [])]
+    form.severity = row.severity ?? 'warning'
   } else {
     Object.assign(form, { ...defaultForm, channels: [], recipients: [''] })
   }
@@ -293,6 +309,7 @@ async function handleSubmit() {
       apply_to_all: form.apply_to_all,
       specific_platforms: form.apply_to_all ? [] : form.specific_platforms,
       excluded_platforms: form.apply_to_all ? form.excluded_platforms : [],
+      severity: form.severity,
     }
     if (isEdit.value && editId.value) {
       await updateAlertRule(editId.value, payload)
