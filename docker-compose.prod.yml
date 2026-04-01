@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  app:
+    image: ghcr.io/wangpq-git/super-domains/backend:latest
+    container_name: sdm-api
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+  celery-worker:
+    image: ghcr.io/wangpq-git/super-domains/backend:latest
+    container_name: sdm-celery-worker
+    command: celery -A app.core.celery_app worker -l info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+  celery-beat:
+    image: ghcr.io/wangpq-git/super-domains/backend:latest
+    container_name: sdm-celery-beat
+    command: celery -A app.core.celery_app beat -l info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/domain_manage
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/wangpq-git/super-domains/frontend:latest
+    container_name: sdm-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    container_name: sdm-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=domain_manage
+    volumes:
+      - sdm_postgres_data:/var/lib/postgresql/data
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: sdm-redis
+    networks:
+      - sdm-net
+    restart: unless-stopped
+
+volumes:
+  sdm_postgres_data:
+
+networks:
+  sdm-net:
+    driver: bridge
