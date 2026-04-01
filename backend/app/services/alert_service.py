@@ -125,7 +125,11 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
             continue
 
         if rule.apply_to_all:
-            domains_to_alert = expiring
+            excluded = rule.excluded_platforms if isinstance(rule.excluded_platforms, list) else []
+            if excluded:
+                domains_to_alert = [d for d in expiring if d["platform"] not in excluded]
+            else:
+                domains_to_alert = expiring
         else:
             domains_to_alert = []
             if rule.specific_platforms:

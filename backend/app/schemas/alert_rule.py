@@ -12,6 +12,7 @@ class AlertRuleCreate(BaseModel):
     apply_to_all: bool = True
     specific_platforms: list[str] | None = None
     specific_domains: list[int] | None = None
+    excluded_platforms: list[str] = Field(default_factory=list)
 
 
 class AlertRuleUpdate(BaseModel):
@@ -24,6 +25,7 @@ class AlertRuleUpdate(BaseModel):
     apply_to_all: bool | None = None
     specific_platforms: list[str] | None = None
     specific_domains: list[int] | None = None
+    excluded_platforms: list[str] | None = None
 
 
 class AlertRuleResponse(BaseModel):
@@ -39,4 +41,5 @@ class AlertRuleResponse(BaseModel):
     apply_to_all: bool
     specific_platforms: list | None
     specific_domains: list | None
+    excluded_platforms: list | None
     created_at: datetime

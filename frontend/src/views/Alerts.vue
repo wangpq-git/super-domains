@@ -118,6 +118,11 @@
         <el-form-item label="适用范围">
           <el-switch v-model="form.apply_to_all" active-text="全部域名" inactive-text="指定域名" />
         </el-form-item>
+        <el-form-item v-if="form.apply_to_all" label="排除平台">
+          <el-select v-model="form.excluded_platforms" multiple placeholder="选择要排除的平台（可选）" style="width: 100%">
+            <el-option v-for="p in platforms" :key="p" :label="p" :value="p" />
+          </el-select>
+        </el-form-item>
         <el-form-item v-if="!form.apply_to_all" label="指定平台">
           <el-select v-model="form.specific_platforms" multiple placeholder="选择平台" style="width: 100%">
             <el-option v-for="p in platforms" :key="p" :label="p" :value="p" />
@@ -172,6 +177,7 @@ const defaultForm = {
   recipients: [''] as string[],
   apply_to_all: true,
   specific_platforms: [] as string[],
+  excluded_platforms: [] as string[],
 }
 
 const form = reactive({ ...defaultForm })
@@ -266,6 +272,7 @@ function openDialog(row?: AlertRule) {
     form.recipients = [...(row.recipients ?? [])]
     form.apply_to_all = row.apply_to_all ?? true
     form.specific_platforms = [...(row.specific_platforms ?? [])]
+    form.excluded_platforms = [...(row.excluded_platforms ?? [])]
   } else {
     Object.assign(form, { ...defaultForm, channels: [], recipients: [''] })
   }
@@ -285,6 +292,7 @@ async function handleSubmit() {
       recipients: form.recipients.filter((r) => r.trim()),
       apply_to_all: form.apply_to_all,
       specific_platforms: form.apply_to_all ? [] : form.specific_platforms,
+      excluded_platforms: form.apply_to_all ? form.excluded_platforms : [],
     }
     if (isEdit.value && editId.value) {
       await updateAlertRule(editId.value, payload)
