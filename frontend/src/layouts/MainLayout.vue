@@ -66,6 +66,9 @@
                 {{ avatarText }}
               </el-avatar>
               <span class="username">{{ displayName }}</span>
+              <el-tag size="small" :type="authStore.isAdmin ? 'primary' : 'info'" style="margin-right: 8px">
+                {{ authStore.isAdmin ? '管理员' : '普通用户' }}
+              </el-tag>
               <el-icon :size="12"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>

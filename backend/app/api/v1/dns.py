@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.models.user import User
 from app.models.domain import Domain
 from app.schemas.dns_record import (
@@ -45,7 +45,7 @@ async def sync_dns_records(domain_id: int, db: AsyncSession = Depends(get_db)):
 async def create_dns_record(
     domain_id: int,
     data: DnsRecordCreate,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -59,7 +59,7 @@ async def create_dns_record(
 async def update_dns_record(
     record_id: int,
     data: DnsRecordUpdate,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -74,7 +74,7 @@ async def update_dns_record(
 @router.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dns_record(
     record_id: int,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     try:

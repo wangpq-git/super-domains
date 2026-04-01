@@ -7,7 +7,7 @@
           <div>
             <el-button :icon="Refresh" circle @click="handleRefresh" />
             <el-button type="success" :icon="Refresh" :loading="syncingAll" @click="handleSyncAll">一键同步所有</el-button>
-            <el-button type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
+            <el-button v-if="authStore.isAdmin" type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
           </div>
         </div>
       </template>
@@ -33,9 +33,9 @@
         </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
+            <el-button v-if="authStore.isAdmin" size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
             <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
-            <el-dropdown trigger="click">
+            <el-dropdown v-if="authStore.isAdmin" trigger="click">
               <el-button size="small">
                 更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
@@ -82,10 +82,12 @@ import { Plus, Edit, Delete, Refresh, Connection, ArrowDown } from '@element-plu
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { useAccountsStore } from '@/stores/accounts'
+import { useAuthStore } from '@/stores/auth'
 import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts } from '@/api/accounts'
 import { platformLabel, formatDateTime, platformTagType } from '@/utils/format'
 
 const store = useAccountsStore()
+const authStore = useAuthStore()
 const formRef = ref<FormInstance>()
 const dialogVisible = ref(false)
 const isEdit = ref(false)

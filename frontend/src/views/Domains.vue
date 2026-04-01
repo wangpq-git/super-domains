@@ -41,7 +41,7 @@
       <div v-if="selectedDomains.length > 0" class="batch-bar">
         <span class="batch-info">已选择 {{ selectedDomains.length }} 项</span>
         <el-button type="primary" :loading="batchLoading" @click="handleBatchSync">批量同步</el-button>
-        <el-button type="warning" :loading="batchLoading" @click="showNsDialog = true">批量修改NS</el-button>
+        <el-button v-if="authStore.isAdmin" type="warning" :loading="batchLoading" @click="showNsDialog = true">批量修改NS</el-button>
         <el-button @click="clearSelection">取消选择</el-button>
       </div>
 
@@ -139,6 +139,7 @@ import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
+import { useAuthStore } from '@/stores/auth'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
 import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
@@ -152,6 +153,7 @@ interface DomainRow {
 }
 
 const store = useDomainsStore()
+const authStore = useAuthStore()
 const dateRange = ref<string[]>([])
 const tableRef = ref<InstanceType<typeof ElTable>>()
 const selectedDomains = ref<DomainRow[]>([])

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.models.user import User
 from app.schemas.alert_rule import (
     AlertRuleCreate,
@@ -23,10 +23,10 @@ async def get_alert_rules(db: AsyncSession = Depends(get_db)):
 @router.post("/rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
 async def create_alert_rule(
     data: AlertRuleCreate,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    rule = await alert_service.create_alert_rule(db, data, current_user.id)
+    rule = await alert_service.create_alert_rule(db, data, admin.id)
     return rule
 
 
@@ -34,7 +34,7 @@ async def create_alert_rule(
 async def update_alert_rule(
     rule_id: int,
     data: AlertRuleUpdate,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     rule = await alert_service.update_alert_rule(db, rule_id, data)
@@ -46,7 +46,7 @@ async def update_alert_rule(
 @router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alert_rule(
     rule_id: int,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     deleted = await alert_service.delete_alert_rule(db, rule_id)

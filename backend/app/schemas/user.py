@@ -20,7 +20,9 @@ class UserResponse(BaseModel):
 
     id: int
     username: str
-    email: str | None
+    email: str | None = None
     role: str
     is_active: bool
+    auth_source: str | None = None
+    display_name: str | None = None
     created_at: datetime

@@ -28,7 +28,7 @@
         <el-form-item>
           <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords" />
           <el-button type="primary" :icon="Refresh" :loading="syncing" :disabled="!selectedDomainId" @click="handleSync">同步记录</el-button>
-          <el-button type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
+          <el-button v-if="authStore.isAdmin" type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -61,8 +61,8 @@
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" type="primary" :icon="Edit" @click="openDialog(row)">编辑</el-button>
-              <el-popconfirm title="确定删除该DNS记录吗？" @confirm="handleDelete(row)">
+              <el-button v-if="authStore.isAdmin" size="small" type="primary" :icon="Edit" @click="openDialog(row)">编辑</el-button>
+              <el-popconfirm v-if="authStore.isAdmin" title="确定删除该DNS记录吗？" @confirm="handleDelete(row)">
                 <template #reference>
                   <el-button size="small" type="danger" :icon="Delete">删除</el-button>
                 </template>
@@ -110,6 +110,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
@@ -123,6 +124,7 @@ import {
 } from '@/api/dns'
 import type { DnsRecord } from '@/api/dns'
 
+const authStore = useAuthStore()
 const domainList = ref<any[]>([])
 const selectedDomainId = ref<number | null>(null)
 const records = ref<DnsRecord[]>([])

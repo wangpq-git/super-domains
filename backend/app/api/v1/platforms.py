@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+import redis.asyncio as aioredis
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.models.user import User
+from app.core.config import settings
 from app.schemas.platform_account import (
     PlatformAccountCreate,
     PlatformAccountUpdate,
@@ -26,10 +28,10 @@ async def list_platforms(
 @router.post("", response_model=PlatformAccountResponse, status_code=status.HTTP_201_CREATED)
 async def create_platform(
     data: PlatformAccountCreate,
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    account = await platform_service.create_account(db, data, current_user.id)
+    account = await platform_service.create_account(db, data, admin.id)
     result = await platform_service.get_account(db, account.id)
     result_dict = {
         "id": result.id,
@@ -68,6 +70,7 @@ async def get_platform(account_id: int, db: AsyncSession = Depends(get_db)):
 async def update_platform(
     account_id: int,
     data: PlatformAccountUpdate,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     account = await platform_service.update_account(db, account_id, data)
@@ -88,14 +91,14 @@ async def update_platform(
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_platform(account_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_platform(account_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     deleted = await platform_service.delete_account(db, account_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
 
 @router.post("/{account_id}/test")
-async def test_connection(account_id: int, db: AsyncSession = Depends(get_db)):
+async def test_connection(account_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     account = await platform_service.get_account(db, account_id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -116,7 +119,19 @@ async def test_connection(account_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{account_id}/sync")
-async def sync_account(account_id: int, db: AsyncSession = Depends(get_db)):
+async def sync_account(account_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    r = aioredis.from_url(settings.REDIS_URL)
+    key = f"sync_rate:{current_user.id}"
+    count = await r.get(key)
+    if count and int(count) >= 3:
+        await r.aclose()
+        raise HTTPException(status_code=429, detail="同步频率过高，每5分钟最多3次")
+    pipe = r.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, 300)
+    await pipe.execute()
+    await r.aclose()
+
     account = await platform_service.get_account(db, account_id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -132,7 +147,7 @@ async def sync_account(account_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sync-all")
-async def sync_all_accounts(db: AsyncSession = Depends(get_db)):
+async def sync_all_accounts(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from app.services.sync_service import sync_all_accounts as do_sync_all
 
     results = await do_sync_all(db)
