@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=6)
+    password: str | None = None
     email: str | None = None
     role: str | None = "viewer"
 

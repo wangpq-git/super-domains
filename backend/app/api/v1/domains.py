@@ -15,6 +15,8 @@ async def list_domains(
     search: Optional[str] = Query(default=None),
     expiry_start: Optional[str] = Query(default=None),
     expiry_end: Optional[str] = Query(default=None),
+    sort_by: str = Query("expiry_date", description="排序字段"),
+    sort_order: str = Query("asc", description="排序方向 asc/desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -26,6 +28,8 @@ async def list_domains(
         search=search,
         expiry_start=expiry_start,
         expiry_end=expiry_end,
+        sort_by=sort_by,
+        sort_order=sort_order,
         page=page,
         page_size=page_size,
     )

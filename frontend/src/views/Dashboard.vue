@@ -123,52 +123,69 @@ onMounted(async () => {
 <style scoped>
 .dashboard-container {
   width: 100%;
-  padding: 20px;
 }
 
 .stat-row {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
   text-align: center;
-  border-radius: 8px;
-  transition: all 0.3s;
-  border-left: 4px solid transparent;
+  border-radius: 12px !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none !important;
+  overflow: hidden;
+  position: relative;
 }
 
 .stat-card--blue {
-  border-left-color: #409eff;
+  background: linear-gradient(135deg, #4361ee 0%, #6c83f2 100%) !important;
 }
 
 .stat-card--orange {
-  border-left-color: #e6a23c;
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%) !important;
 }
 
 .stat-card--red {
-  border-left-color: #f56c6c;
+  background: linear-gradient(135deg, #ef4444 0%, #f87171 100%) !important;
 }
 
 .stat-card--green {
-  border-left-color: #67c23a;
+  background: linear-gradient(135deg, #10b981 0%, #34d399 100%) !important;
+}
+
+.stat-card :deep(.el-statistic__head) {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-size: 13px;
+}
+
+.stat-card :deep(.el-statistic__number) {
+  color: #fff !important;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.stat-card :deep(.el-statistic__prefix .el-icon) {
+  color: rgba(255, 255, 255, 0.9) !important;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15) !important;
 }
 
 .chart-row {
-  margin-top: 20px;
+  margin-top: 0;
 }
 
 .chart-card {
-  border-radius: 8px;
+  border-radius: 12px !important;
 }
 
 .chart-header {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
+  color: #1e293b;
 }
 
 .chart-wrapper {

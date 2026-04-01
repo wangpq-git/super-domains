@@ -7,8 +7,8 @@ export interface AccountData {
   config?: Record<string, any>
 }
 
-export function getAccounts() {
-  return request.get('/platforms')
+export function getAccounts(params?: { sort_by?: string; sort_order?: string }) {
+  return request.get('/platforms', { params })
 }
 
 export function createAccount(data: any) {

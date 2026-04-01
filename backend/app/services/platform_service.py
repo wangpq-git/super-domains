@@ -7,7 +7,14 @@ from app.schemas.platform_account import PlatformAccountCreate, PlatformAccountU
 from app.core.encryption import encrypt_credentials
 
 
-async def list_accounts(db: AsyncSession) -> list[dict]:
+async def list_accounts(db: AsyncSession, sort_by: str = "created_at", sort_order: str = "desc") -> list[dict]:
+    ALLOWED_SORT_FIELDS = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
+    if sort_by in ALLOWED_SORT_FIELDS:
+        col = getattr(PlatformAccount, sort_by)
+        order_col = col.desc() if sort_order == "desc" else col.asc()
+    else:
+        order_col = PlatformAccount.created_at.desc()
+
     result = await db.execute(
         select(
             PlatformAccount.id,
@@ -22,7 +29,7 @@ async def list_accounts(db: AsyncSession) -> list[dict]:
         )
         .outerjoin(Domain, Domain.account_id == PlatformAccount.id)
         .group_by(PlatformAccount.id)
-        .order_by(PlatformAccount.created_at.desc())
+        .order_by(order_col)
     )
     return [row._asdict() for row in result.all()]
 

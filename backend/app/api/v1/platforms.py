@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
@@ -14,8 +14,12 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[PlatformAccountResponse])
-async def list_platforms(db: AsyncSession = Depends(get_db)):
-    rows = await platform_service.list_accounts(db)
+async def list_platforms(
+    sort_by: str = Query("created_at", description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向 asc/desc"),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await platform_service.list_accounts(db, sort_by=sort_by, sort_order=sort_order)
     return rows
 
 

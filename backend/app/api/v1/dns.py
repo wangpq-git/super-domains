@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
@@ -15,9 +15,14 @@ router = APIRouter()
 
 
 @router.get("/{domain_id}/records", response_model=list[DnsRecordResponse])
-async def list_dns_records(domain_id: int, db: AsyncSession = Depends(get_db)):
+async def list_dns_records(
+    domain_id: int,
+    sort_by: str = Query("record_type", description="排序字段"),
+    sort_order: str = Query("asc", description="排序方向 asc/desc"),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        records = await dns_service.list_dns_records(db, domain_id)
+        records = await dns_service.list_dns_records(db, domain_id, sort_by=sort_by, sort_order=sort_order)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return records

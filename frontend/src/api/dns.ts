@@ -18,8 +18,8 @@ export interface DnsRecord extends DnsRecordData {
   updated_at: string
 }
 
-export function getDnsRecords(domainId: number) {
-  return request.get(`/dns/${domainId}/records`)
+export function getDnsRecords(domainId: number, params?: { sort_by?: string; sort_order?: string }) {
+  return request.get(`/dns/${domainId}/records`, { params })
 }
 
 export function syncDnsRecords(domainId: number) {

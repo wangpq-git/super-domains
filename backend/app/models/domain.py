@@ -32,4 +32,3 @@ class Domain(Base):
 
     account = relationship("PlatformAccount", back_populates="domains")
     dns_records = relationship("DnsRecord", back_populates="domain", cascade="all, delete-orphan")
-    transfers = relationship("DomainTransfer", back_populates="domain")

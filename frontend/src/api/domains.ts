@@ -6,6 +6,8 @@ export interface DomainParams {
   search?: string
   expiry_start?: string
   expiry_end?: string
+  sort_by?: string
+  sort_order?: string
   page?: number
   page_size?: number
 }

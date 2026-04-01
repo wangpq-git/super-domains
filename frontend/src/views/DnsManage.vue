@@ -26,6 +26,7 @@
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords" />
           <el-button type="primary" :icon="Refresh" :loading="syncing" :disabled="!selectedDomainId" @click="handleSync">同步记录</el-button>
           <el-button type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
         </el-form-item>
@@ -34,15 +35,15 @@
 
     <el-card shadow="never" style="margin-top: 16px">
       <template v-if="selectedDomainId">
-        <el-table v-if="records.length > 0 || loading" v-loading="loading" :data="records" stripe style="width: 100%">
-          <el-table-column prop="record_type" label="类型" width="90">
+        <el-table v-if="records.length > 0 || loading" v-loading="loading" :data="records" stripe style="width: 100%" @sort-change="handleSortChange">
+          <el-table-column prop="record_type" label="类型" width="90" sortable="custom">
             <template #default="{ row }">
               <el-tag :type="recordTypeTag(row.record_type)" size="small">{{ row.record_type }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="content" label="内容" min-width="250" show-overflow-tooltip />
-          <el-table-column prop="ttl" label="TTL" width="90" align="center" />
+          <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="content" label="内容" min-width="250" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="ttl" label="TTL" width="90" align="center" sortable="custom" />
           <el-table-column prop="priority" label="优先级" width="80" align="center">
             <template #default="{ row }">{{ row.priority ?? '-' }}</template>
           </el-table-column>
@@ -134,6 +135,9 @@ const editId = ref<number | null>(null)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
+const dnsSortBy = ref('record_type')
+const dnsSortOrder = ref('asc')
+
 const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
 
 const defaultForm = { record_type: 'A', name: '', content: '', ttl: 3600, priority: 0, proxied: false }
@@ -189,7 +193,7 @@ async function fetchRecords() {
   if (!selectedDomainId.value) return
   loading.value = true
   try {
-    const { data } = await getDnsRecords(selectedDomainId.value)
+    const { data } = await getDnsRecords(selectedDomainId.value, { sort_by: dnsSortBy.value, sort_order: dnsSortOrder.value })
     records.value = data ?? []
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '获取DNS记录失败')
@@ -197,6 +201,17 @@ async function fetchRecords() {
   } finally {
     loading.value = false
   }
+}
+
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (order) {
+    dnsSortBy.value = prop
+    dnsSortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    dnsSortBy.value = 'record_type'
+    dnsSortOrder.value = 'asc'
+  }
+  fetchRecords()
 }
 
 function handleDomainChange() {

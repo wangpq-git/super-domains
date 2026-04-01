@@ -15,6 +15,8 @@ export const useDomainsStore = defineStore('domains', () => {
     search: '',
     expiry_start: '',
     expiry_end: '',
+    sort_by: 'expiry_date',
+    sort_order: 'asc',
     page: 1,
     page_size: 20,
   })
@@ -46,6 +48,8 @@ export const useDomainsStore = defineStore('domains', () => {
       search: '',
       expiry_start: '',
       expiry_end: '',
+      sort_by: 'expiry_date',
+      sort_order: 'asc',
       page: 1,
       page_size: 20,
     }

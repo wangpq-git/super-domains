@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # 加密密钥 - 用于凭证加密
     ENCRYPTION_KEY: str = secrets.token_urlsafe(32)
 
+    # LDAP 配置
+    LDAP_ENABLED: bool = True
+    LDAP_HOST: str = "ldap.adsconflux.xyz"
+    LDAP_PORT: int = 389
+    LDAP_USE_SSL: bool = False
+    LDAP_BASE_DN: str = "ou=users,dc=adsconflux,dc=xyz"
+    LDAP_BIND_DN: str = "cn=read,dc=adsconflux,dc=xyz"
+    LDAP_BIND_PASSWORD: str = ""
+    LDAP_USER_FILTER: str = "(uid={username})"
+
     # 可选的环境配置
     ENV: str = "development"
     DEBUG: bool = True

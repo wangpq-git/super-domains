@@ -46,6 +46,7 @@
       </div>
 
       <div class="export-bar">
+        <el-button :icon="Refresh" circle @click="handleRefresh" />
         <el-button :icon="Download" @click="handleExportCsv">导出CSV</el-button>
         <el-button :icon="Download" @click="handleExportXlsx">导出Excel</el-button>
       </div>
@@ -59,21 +60,22 @@
         :row-style="{ height: '44px' }"
         style="width: 100%"
         @selection-change="handleSelectionChange"
+        @sort-change="handleSortChange"
       >
         <el-table-column type="selection" width="50" />
-        <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="platform" label="平台" width="130">
           <template #default="{ row }">
             <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="account" label="账户" width="150" show-overflow-tooltip />
-        <el-table-column prop="expiry_date" label="到期日期" width="120">
+        <el-table-column prop="expiry_date" label="到期日期" width="120" sortable="custom">
           <template #default="{ row }">
             <span :class="expiryClass(row.expiry_date)">{{ formatDate(row.expiry_date) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="100" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
@@ -133,7 +135,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Search, Download, Delete } from '@element-plus/icons-vue'
+import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
@@ -268,6 +270,22 @@ async function handleBatchNs() {
   }
 }
 
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (order) {
+    store.filters.sort_by = prop
+    store.filters.sort_order = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    store.filters.sort_by = 'expiry_date'
+    store.filters.sort_order = 'asc'
+  }
+  store.filters.page = 1
+  store.fetchDomains()
+}
+
+function handleRefresh() {
+  store.fetchDomains()
+}
+
 function handleDateChange(val: string[] | null) {
   store.filters.expiry_start = val?.[0] ?? ''
   store.filters.expiry_end = val?.[1] ?? ''
@@ -300,39 +318,59 @@ onMounted(() => {
 .domains-container {
   width: 100%;
 }
+
 .filter-card {
   margin-bottom: 0;
+  border-radius: 8px !important;
 }
+
+.filter-card :deep(.el-card__body) {
+  padding: 16px 20px;
+}
+
+.filter-card :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
 .batch-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  background: #ecf5ff;
-  border-radius: 6px;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
+  border-radius: 8px;
+  border: 1px solid #dbeafe;
 }
+
 .batch-info {
-  font-size: 14px;
-  color: #409eff;
+  font-size: 13px;
+  color: #4361ee;
+  font-weight: 600;
   margin-right: 8px;
 }
+
 .export-bar {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
-.expiry-safe { color: #67c23a; }
-.expiry-warning { color: #e6a23c; font-weight: 600; }
-.expiry-danger { color: #f56c6c; font-weight: 600; }
-.expiry-expired { color: #f56c6c; font-weight: 600; text-decoration: line-through; }
+
+.expiry-safe { color: #10b981; font-weight: 500; }
+.expiry-warning { color: #f59e0b; font-weight: 600; }
+.expiry-danger { color: #ef4444; font-weight: 600; }
+.expiry-expired { color: #ef4444; font-weight: 600; text-decoration: line-through; }
+
 .ns-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ns-tag { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .text-muted { color: #c0c4cc; }
+
 .pagination-wrapper {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
 }
 </style>

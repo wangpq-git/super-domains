@@ -30,12 +30,15 @@ async def _get_dns_record_with_domain(db: AsyncSession, record_id: int) -> DnsRe
     return result.scalar_one_or_none()
 
 
-async def list_dns_records(db: AsyncSession, domain_id: int) -> list[DnsRecord]:
-    result = await db.execute(
-        select(DnsRecord)
-        .where(DnsRecord.domain_id == domain_id)
-        .order_by(DnsRecord.record_type, DnsRecord.name)
-    )
+async def list_dns_records(db: AsyncSession, domain_id: int, *, sort_by: str = "record_type", sort_order: str = "asc") -> list[DnsRecord]:
+    ALLOWED_SORT_FIELDS = {"record_type", "name", "content", "ttl"}
+    query = select(DnsRecord).where(DnsRecord.domain_id == domain_id)
+    if sort_by in ALLOWED_SORT_FIELDS:
+        col = getattr(DnsRecord, sort_by)
+        query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+    else:
+        query = query.order_by(DnsRecord.record_type.asc(), DnsRecord.name.asc())
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 

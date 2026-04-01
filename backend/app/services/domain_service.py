@@ -19,6 +19,8 @@ async def list_domains(
     search: Optional[str] = None,
     expiry_start: Optional[str] = None,
     expiry_end: Optional[str] = None,
+    sort_by: str = "expiry_date",
+    sort_order: str = "asc",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -75,7 +77,13 @@ async def list_domains(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.order_by(Domain.expiry_date.asc())
+    ALLOWED_SORT_FIELDS = {"domain_name", "expiry_date", "status", "created_at", "registration_date", "tld"}
+    if sort_by in ALLOWED_SORT_FIELDS:
+        col = getattr(Domain, sort_by)
+        query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+    else:
+        query = query.order_by(Domain.expiry_date.asc())
+
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 

@@ -5,21 +5,22 @@
         <div class="card-header">
           <span>平台账户管理</span>
           <div>
+            <el-button :icon="Refresh" circle @click="handleRefresh" />
             <el-button type="success" :icon="Refresh" :loading="syncingAll" @click="handleSyncAll">一键同步所有</el-button>
             <el-button type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
           </div>
         </div>
       </template>
 
-      <el-table v-loading="store.loading" :data="store.accounts" stripe style="width: 100%">
-        <el-table-column prop="platform" label="平台" width="140">
+      <el-table v-loading="store.loading" :data="store.accounts" stripe style="width: 100%" @sort-change="handleSortChange">
+        <el-table-column prop="platform" label="平台" width="140" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
-        <el-table-column prop="last_sync_at" label="最后同步" width="180">
+        <el-table-column prop="last_sync_at" label="最后同步" width="180" sortable="custom">
           <template #default="{ row }">{{ row.last_sync_at ? formatDateTime(row.last_sync_at) : '从未同步' }}</template>
         </el-table-column>
         <el-table-column prop="sync_status" label="同步状态" width="110" align="center">
@@ -154,6 +155,21 @@ const currentCredentialFields = computed(() => {
 const rules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   name: [{ required: true, message: '请输入账户名称', trigger: 'blur' }],
+}
+
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (order) {
+    store.sortBy = prop
+    store.sortOrder = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    store.sortBy = 'created_at'
+    store.sortOrder = 'desc'
+  }
+  store.fetchAccounts()
+}
+
+function handleRefresh() {
+  store.fetchAccounts()
 }
 
 function openDialog(row?: any) {
