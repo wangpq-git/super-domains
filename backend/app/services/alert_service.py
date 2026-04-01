@@ -180,7 +180,7 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
         if "feishu" in channels and recipients:
             for url in recipients:
                 if url.startswith("http"):
-                    await send_feishu(url, title, markdown_body)
+                    await send_feishu(url, title, domains_to_alert)
                     total_notifications += 1
 
         if "webhook" in channels and recipients:
