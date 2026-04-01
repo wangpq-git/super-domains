@@ -67,12 +67,23 @@ class SpaceshipAdapter(BasePlatformAdapter):
             )
 
             if response.status_code == 404:
-                # Try alternative auth method - direct header auth
+                # Spaceship uses direct API key auth in headers
                 logger.info("Token endpoint not found, trying API key header auth")
-                self._access_token = f"{self.api_key}:{self.api_secret}"
-                self._token_expires_at = datetime.now().replace(microsecond=0) + httpx.Timeout(3600).connect_timeout
-                # Set to 24 hours as fallback
-                self._token_expires_at = datetime.now().replace(microsecond=0) + __import__("datetime").timedelta(hours=24)
+                self.client.headers["X-Api-Key"] = self.api_key
+                self.client.headers["X-Api-Secret"] = self.api_secret
+                # Verify by making a test request
+                test_response = await self.client.get(f"{self.BASE_URL}/domains", params={"limit": 1})
+                if test_response.status_code == 401:
+                    # Try Basic auth
+                    import base64
+                    credentials = base64.b64encode(f"{self.api_key}:{self.api_secret}".encode()).decode()
+                    self.client.headers.pop("X-Api-Key", None)
+                    self.client.headers.pop("X-Api-Secret", None)
+                    self.client.headers["Authorization"] = f"Basic {credentials}"
+                    test_response2 = await self.client.get(f"{self.BASE_URL}/domains", params={"limit": 1})
+                    test_response2.raise_for_status()
+                self._access_token = None  # Using header auth, no token needed
+                self._token_expires_at = None
                 return True
 
             response.raise_for_status()

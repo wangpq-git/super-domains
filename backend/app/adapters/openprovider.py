@@ -24,6 +24,7 @@ class OpenproviderAdapter(BasePlatformAdapter):
         client = self.client
         if self._access_token:
             client.headers["Authorization"] = f"Bearer {self._access_token}"
+        client.headers["Accept"] = "application/json"
         return client
 
     async def _ensure_authenticated(self) -> bool:
@@ -44,7 +45,8 @@ class OpenproviderAdapter(BasePlatformAdapter):
                 f"{self.BASE_URL}/auth/login",
                 json={
                     "username": self.username,
-                    "password": self.password
+                    "password": self.password,
+                    "ip": self.credentials.get("ip", "0.0.0.0")
                 }
             )
             response.raise_for_status()
@@ -52,8 +54,14 @@ class OpenproviderAdapter(BasePlatformAdapter):
 
             # Handle different response structures
             if isinstance(data, dict):
-                token = data.get("access_token", data.get("token", data.get("data", {}).get("access_token")))
-                expires_in = data.get("expires_in", data.get("data", {}).get("expires_in", 3600))
+                data_section = data.get("data", {})
+                if isinstance(data_section, dict):
+                    token = data_section.get("token", data_section.get("access_token"))
+                else:
+                    token = None
+                if not token:
+                    token = data.get("access_token", data.get("token"))
+                expires_in = data_section.get("expires_in", data.get("expires_in", 3600)) if isinstance(data_section, dict) else data.get("expires_in", 3600)
 
                 if token:
                     self._access_token = token
@@ -76,27 +84,42 @@ class OpenproviderAdapter(BasePlatformAdapter):
             client = await self._get_client()
 
             all_domains = []
-            current_page = page
+            offset = 0
+
+            auth_headers = {
+                "Authorization": f"Bearer {self._access_token}",
+                "Accept": "application/json"
+            }
 
             while True:
                 response = await client.get(
                     f"{self.BASE_URL}/domains",
                     params={
-                        "page": current_page,
+                        "offset": offset,
                         "limit": limit
-                    }
+                    },
+                    headers=auth_headers
                 )
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"OpenProvider domains response ({response.status_code}): {response.text[:500]}")
+                    try:
+                        err_body = response.json()
+                        err_msg = err_body.get("desc", err_body.get("message", str(err_body)[:300]))
+                    except Exception:
+                        err_msg = response.text[:300]
+                    raise RuntimeError(f"OpenProvider API error ({response.status_code}): {err_msg}")
                 data = response.json()
 
                 domains = self._parse_domain_list(data)
                 all_domains.extend(domains)
 
-                # Check if there are more pages
-                total = data.get("total", data.get("data", {}).get("total", 0))
+                total = 0
+                data_section = data.get("data", {})
+                if isinstance(data_section, dict):
+                    total = data_section.get("total", 0)
                 if len(all_domains) >= total or len(domains) < limit:
                     break
-                current_page += 1
+                offset += limit
 
             return all_domains
         except Exception as e:
@@ -104,64 +127,76 @@ class OpenproviderAdapter(BasePlatformAdapter):
             raise
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
-        """Parse OpenProvider domain list response defensively"""
+        """Parse OpenProvider domain list response"""
         domains = []
         if not isinstance(data, dict):
             return domains
 
-        # OpenProvider typically returns data under 'data' or 'results'
-        domain_data = data.get("data", data.get("results", data.get("domains", [])))
-        if not isinstance(domain_data, list):
-            domain_data = [domain_data] if domain_data else []
+        results = data.get("data", {}).get("results", [])
+        if not isinstance(results, list):
+            return domains
 
-        for item in domain_data:
+        for item in results:
             if not isinstance(item, dict):
                 continue
             try:
-                name = item.get("domain", item.get("name", ""))
-                if not name:
+                domain_info = item.get("domain", {})
+                if isinstance(domain_info, dict):
+                    name = domain_info.get("name", "")
+                    extension = domain_info.get("extension", "")
+                    if name and extension:
+                        domain_name = f"{name}.{extension}"
+                    else:
+                        domain_name = name or ""
+                else:
+                    domain_name = item.get("domain", item.get("name", ""))
+
+                if not domain_name:
                     continue
-                tld = name.split(".")[-1] if "." in name else ""
 
-                # Parse expiry date
-                expiry_str = item.get("expiry_date", item.get("expires_on", item.get("expiry", "")))
-                expiry_date = self._parse_date(expiry_str) if expiry_str else datetime.now()
+                tld = domain_name.split(".")[-1] if "." in domain_name else ""
 
-                # Parse registration date
-                reg_str = item.get("registration_date", item.get("created_on", item.get("created", "")))
-                reg_date = self._parse_date(reg_str) if reg_str else None
+                creation_str = item.get("creation_date", "")
+                expiry_str = item.get("expiration_date", "")
 
-                # Map status
-                status_map = {
-                    "active": "active",
-                    "inactive": "inactive",
-                    "expired": "expired",
-                    "pending": "pending",
-                    "locked": "locked",
-                    "redemption": "redemption"
-                }
-                status = status_map.get(item.get("status", "active").lower(), "active")
+                creation_date = None
+                expiry_date = None
+                if creation_str and creation_str != "0":
+                    try:
+                        creation_date = datetime.fromisoformat(creation_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except Exception:
+                        pass
+                if expiry_str and expiry_str != "0":
+                    try:
+                        expiry_date = datetime.fromisoformat(expiry_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except Exception:
+                        pass
 
-                # Auto-renew
-                auto_renew = item.get("auto_renew", item.get("autorenew", False))
-                if isinstance(auto_renew, str):
-                    auto_renew = auto_renew.lower() in ("true", "yes", "1")
+                if not expiry_date:
+                    expiry_date = datetime.now()
+
+                autorenew_val = item.get("autorenew", "off")
+                auto_renew = autorenew_val == "on" or autorenew_val is True
+
+                status = item.get("status", "ACT")
+                status_map = {"ACT": "active", "FAI": "expired", "PEN": "pending", "DEL": "removed"}
+                mapped_status = status_map.get(status, "active")
 
                 domains.append(DomainInfo(
-                    name=name,
+                    name=domain_name,
                     tld=tld,
-                    status=status,
-                    registration_date=reg_date,
+                    status=mapped_status,
+                    registration_date=creation_date,
                     expiry_date=expiry_date,
                     auto_renew=auto_renew,
-                    locked=item.get("locked", False),
-                    whois_privacy=item.get("whois_privacy", item.get("privacy", False)),
-                    nameservers=item.get("nameservers") or [],
-                    external_id=item.get("id", item.get("domain_id", str(item.get("uuid", "")))),
+                    locked=item.get("is_locked", False),
+                    whois_privacy=item.get("whois_privacy", {}).get("is_enabled", False) if isinstance(item.get("whois_privacy"), dict) else False,
+                    nameservers=[ns.get("name", "") for ns in item.get("nameservers", []) if isinstance(ns, dict)] if isinstance(item.get("nameservers"), list) else [],
+                    external_id=str(item.get("id", domain_name)),
                     raw_data=item
                 ))
             except Exception as e:
-                logger.warning(f"Failed to parse OpenProvider domain item: {item}, error: {e}")
+                logger.warning(f"Failed to parse OpenProvider domain: {item}, error: {e}")
                 continue
         return domains
 

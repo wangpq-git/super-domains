@@ -307,12 +307,17 @@ onMounted(() => {
 
 <style scoped>
 .settings-container {
-  max-width: 1200px;
+  width: 100%;
+  padding-bottom: 20px;
 }
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.card-header span {
+  font-size: 18px;
+  font-weight: 600;
 }
 .days-safe { color: #67c23a; font-weight: 600; }
 .days-warning { color: #e6a23c; font-weight: 600; }

@@ -16,7 +16,7 @@ async def list_domains(
     expiry_start: Optional[str] = Query(default=None),
     expiry_end: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     result = await domain_service.list_domains(

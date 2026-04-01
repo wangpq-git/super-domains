@@ -42,13 +42,18 @@ class NamecheapAdapter(BasePlatformAdapter):
             except Exception as e:
                 raise RuntimeError(f"Namecheap API XML parse error: {e}")
 
+            for elem in root.iter():
+                if elem.tag and isinstance(elem.tag, str) and '}' in elem.tag:
+                    elem.tag = elem.tag.split('}', 1)[1]
+
             status = root.get("Status", "")
             if status == "ERROR":
                 errors = root.findall(".//Errors/Error")
                 if errors:
                     error_msg = "; ".join([err.text or "Unknown error" for err in errors])
                     raise RuntimeError(f"Namecheap API error: {error_msg}")
-                raise RuntimeError("Namecheap API error: Unknown error")
+                raw_text = etree.tostring(root, encoding="unicode", pretty_print=False)[:500]
+                raise RuntimeError(f"Namecheap API error (Status=ERROR). Raw: {raw_text}")
 
             return root
 

@@ -95,7 +95,20 @@ async def test_connection(account_id: int, db: AsyncSession = Depends(get_db)):
     account = await platform_service.get_account(db, account_id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    return {"message": f"Connection test for platform '{account.platform}' is not yet implemented", "status": "not_implemented"}
+    from app.core.encryption import decrypt_credentials
+    from app.adapters import get_adapter
+
+    credentials = decrypt_credentials(account.credentials)
+    adapter = get_adapter(account.platform, credentials)
+    try:
+        async with adapter:
+            result = await adapter.authenticate()
+        if result:
+            return {"message": "连接测试成功", "status": "success"}
+        else:
+            return {"message": "认证失败，请检查凭证", "status": "failed"}
+    except Exception as e:
+        return {"message": f"连接测试失败: {str(e)}", "status": "failed"}
 
 
 @router.post("/{account_id}/sync")

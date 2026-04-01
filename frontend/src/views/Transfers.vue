@@ -11,10 +11,10 @@
       <el-table v-loading="loading" :data="transfers" stripe>
         <el-table-column prop="domain_name" label="域名" min-width="180" show-overflow-tooltip />
         <el-table-column prop="from_platform" label="源平台" width="120">
-          <template #default="{ row }"><el-tag size="small">{{ row.from_platform || '-' }}</el-tag></template>
+          <template #default="{ row }"><el-tag size="small">{{ row.from_platform ? platformLabel(row.from_platform) : '-' }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="to_platform" label="目标平台" width="120">
-          <template #default="{ row }"><el-tag type="success" size="small">{{ row.to_platform }}</el-tag></template>
+          <template #default="{ row }"><el-tag type="success" size="small">{{ platformLabel(row.to_platform) }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="110">
           <template #default="{ row }">
@@ -29,22 +29,28 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="initiated_at" label="发起时间" width="160" />
+        <el-table-column prop="initiated_at" label="发起时间" width="160">
+          <template #default="{ row }">{{ formatDateTime(row.initiated_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-select v-if="row.status === 'pending' || row.status === 'in_progress'" v-model="row._newStatus" placeholder="更新状态" size="small" style="width:110px;margin-right:8px" @change="handleUpdateStatus(row)">
-              <el-option label="进行中" value="in_progress" />
-              <el-option label="已完成" value="completed" />
-              <el-option label="失败" value="failed" />
-            </el-select>
-            <el-popconfirm v-if="row.status === 'pending'" title="确定取消此转移？" @confirm="handleCancel(row.id)">
-              <template #reference><el-button size="small" type="danger">取消</el-button></template>
-            </el-popconfirm>
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-select v-if="row.status === 'pending' || row.status === 'in_progress'" v-model="row._newStatus" placeholder="更新状态" size="small" style="width:110px" @change="handleUpdateStatus(row)">
+                <el-option label="进行中" value="in_progress" />
+                <el-option label="已完成" value="completed" />
+                <el-option label="失败" value="failed" />
+              </el-select>
+              <el-popconfirm v-if="row.status === 'pending'" title="确定取消此转移？" @confirm="handleCancel(row.id)">
+                <template #reference><el-button size="small" type="danger">取消</el-button></template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination v-model:current-page="page" :page-size="20" :total="total" layout="total, prev, pager, next" style="margin-top:16px" @change="fetchTransfers" />
+      <div class="pagination">
+        <el-pagination v-model:current-page="page" :page-size="20" :total="total" layout="total, prev, pager, next" @change="fetchTransfers" />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" title="发起域名转移" width="480px" destroy-on-close>
@@ -73,6 +79,7 @@
 import { ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { platformLabel, formatDateTime } from '@/utils/format'
 import { getTransfers, createTransfer, updateTransfer, cancelTransfer } from '@/api/transfers'
 
 const transfers = ref<any[]>([])
@@ -133,3 +140,18 @@ async function handleCancel(id: number) {
 
 onMounted(fetchTransfers)
 </script>
+
+<style scoped>
+.transfers {
+  width: 100%;
+}
+.transfers :deep(.el-card__header) span {
+  font-size: 18px;
+  font-weight: 600;
+}
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+</style>

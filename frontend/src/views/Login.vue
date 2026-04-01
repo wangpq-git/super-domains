@@ -63,6 +63,20 @@ async function handleLogin() {
 .login-card {
   width: 400px;
   border-radius: 12px;
+  backdrop-filter: blur(10px);
+  background: rgba(255,255,255,0.95);
+  animation: fadeInUp 0.5s ease;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .login-header {
   display: flex;
@@ -76,5 +90,8 @@ async function handleLogin() {
 }
 .login-btn {
   width: 100%;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 16px;
 }
 </style>

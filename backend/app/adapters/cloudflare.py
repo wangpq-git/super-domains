@@ -17,25 +17,36 @@ class CloudflareAdapter(BasePlatformAdapter):
         self._rate_limiter = AsyncRateLimiter(calls_per_minute=120)
 
     def _get_headers(self) -> dict:
-        if "api_token" in self.credentials:
-            return {
-                "Authorization": f"Bearer {self.credentials['api_token']}",
-                "Content-Type": "application/json"
-            }
-        elif "api_key" in self.credentials and "email" in self.credentials:
+        if "api_key" in self.credentials and "email" in self.credentials:
             return {
                 "X-Auth-Key": self.credentials["api_key"],
                 "X-Auth-Email": self.credentials["email"],
                 "Content-Type": "application/json"
             }
+        elif "api_token" in self.credentials:
+            return {
+                "Authorization": f"Bearer {self.credentials['api_token']}",
+                "Content-Type": "application/json"
+            }
         else:
-            raise ValueError("Invalid Cloudflare credentials")
+            raise ValueError("Cloudflare requires 'api_key' + 'email' or 'api_token'")
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
         async with self._rate_limiter:
             url = f"{self.BASE_URL}{path}"
             headers = self._get_headers()
             response = await self.client.request(method, url, headers=headers, **kwargs)
+
+            if response.status_code >= 400:
+                try:
+                    err_data = response.json()
+                    errors = err_data.get("errors", [])
+                    if errors:
+                        error_msg = "; ".join([e.get("message", str(e)) for e in errors])
+                        raise RuntimeError(f"Cloudflare API error ({response.status_code}): {error_msg}")
+                except (ValueError, KeyError):
+                    pass
+                response.raise_for_status()
 
             try:
                 data = response.json()
@@ -80,8 +91,10 @@ class CloudflareAdapter(BasePlatformAdapter):
         return None
 
     async def list_domains(self) -> List[DomainInfo]:
+        import asyncio
         domains = []
         page = 1
+        zones_data = []
 
         while True:
             response = await self._request(
@@ -95,12 +108,24 @@ class CloudflareAdapter(BasePlatformAdapter):
                 zone_id = zone["id"]
                 domain_name = zone["name"]
                 self._zone_cache[domain_name] = zone_id
+                zones_data.append(zone)
 
-                expiry_date = None
-                registration_date = None
-                auto_renew = False
-                nameservers = zone.get("name_servers") or []
+            result_info = response.get("result_info", {})
+            if page >= result_info.get("total_pages", 1):
+                break
+            page += 1
 
+        semaphore = asyncio.Semaphore(10)
+
+        async def fetch_registrar(zone):
+            zone_id = zone["id"]
+            domain_name = zone["name"]
+            nameservers = zone.get("name_servers") or []
+            expiry_date = None
+            registration_date = None
+            auto_renew = False
+
+            async with semaphore:
                 try:
                     registrar_info = await self._request(
                         "GET",
@@ -113,40 +138,40 @@ class CloudflareAdapter(BasePlatformAdapter):
                             try:
                                 expiry_date = datetime.fromisoformat(
                                     registrar_data["expires_at"].replace("Z", "+00:00")
-                                )
+                                ).replace(tzinfo=None)
                             except Exception:
                                 pass
                         if registrar_data.get("registered_at"):
                             try:
                                 registration_date = datetime.fromisoformat(
                                     registrar_data["registered_at"].replace("Z", "+00:00")
-                                )
+                                ).replace(tzinfo=None)
                             except Exception:
                                 pass
                 except Exception:
                     pass
 
-                if not expiry_date:
-                    expiry_date = datetime.max.replace(tzinfo=None)
+            if not expiry_date:
+                expiry_date = datetime.max.replace(tzinfo=None)
 
-                domains.append(DomainInfo(
-                    name=domain_name,
-                    tld=domain_name.split(".")[-1],
-                    status="active" if zone.get("status") == "active" else "inactive",
-                    registration_date=registration_date,
-                    expiry_date=expiry_date,
-                    auto_renew=auto_renew,
-                    locked=zone.get("owner", {}).get("type") != "external",
-                    whois_privacy=False,
-                    nameservers=nameservers,
-                    external_id=zone_id,
-                    raw_data=zone
-                ))
+            return DomainInfo(
+                name=domain_name,
+                tld=domain_name.split(".")[-1],
+                status="active" if zone.get("status") == "active" else "inactive",
+                registration_date=registration_date,
+                expiry_date=expiry_date,
+                auto_renew=auto_renew,
+                locked=zone.get("owner", {}).get("type") != "external",
+                whois_privacy=False,
+                nameservers=nameservers,
+                external_id=zone_id,
+                raw_data=zone
+            )
 
-            result_info = response.get("result_info", {})
-            if page >= result_info.get("total_pages", 1):
-                break
-            page += 1
+        results = await asyncio.gather(*[fetch_registrar(z) for z in zones_data], return_exceptions=True)
+        for r in results:
+            if isinstance(r, DomainInfo):
+                domains.append(r)
 
         return domains
 

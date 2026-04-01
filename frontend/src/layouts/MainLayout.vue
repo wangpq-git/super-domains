@@ -126,6 +126,7 @@ const currentPageTitle = computed(() => titleMap[route.path] || '')
   color: #fff;
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: 1px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -139,11 +140,15 @@ const currentPageTitle = computed(() => titleMap[route.path] || '')
   overflow-y: auto;
 }
 
+.side-menu :deep(.el-menu-item) {
+  transition: background-color 0.3s;
+}
+
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #e6e6e6;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   background: #fff;
   padding: 0 20px;
   height: 60px;

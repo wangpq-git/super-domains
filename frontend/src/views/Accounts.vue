@@ -14,13 +14,13 @@
       <el-table v-loading="store.loading" :data="store.accounts" stripe style="width: 100%">
         <el-table-column prop="platform" label="平台" width="140">
           <template #default="{ row }">
-            <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform }}</el-tag>
+            <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
         <el-table-column prop="last_sync_at" label="最后同步" width="180">
-          <template #default="{ row }">{{ row.last_sync_at || '从未同步' }}</template>
+          <template #default="{ row }">{{ row.last_sync_at ? formatDateTime(row.last_sync_at) : '从未同步' }}</template>
         </el-table-column>
         <el-table-column prop="sync_status" label="同步状态" width="110" align="center">
           <template #default="{ row }">
@@ -30,16 +30,21 @@
             <el-tag v-else type="info" size="small">未知</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
             <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
-            <el-button size="small" type="warning" :icon="Edit" @click="openDialog(row)">编辑</el-button>
-            <el-popconfirm title="确定删除该账户吗？" @confirm="handleDelete(row)">
-              <template #reference>
-                <el-button size="small" type="danger" :icon="Delete">删除</el-button>
+            <el-dropdown trigger="click">
+              <el-button size="small">
+                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :icon="Edit" @click="openDialog(row)">编辑</el-dropdown-item>
+                  <el-dropdown-item :icon="Delete" divided @click="confirmDelete(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
               </template>
-            </el-popconfirm>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -72,11 +77,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Refresh, Connection } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Plus, Edit, Delete, Refresh, Connection, ArrowDown } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { useAccountsStore } from '@/stores/accounts'
 import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts } from '@/api/accounts'
+import { platformLabel, formatDateTime, platformTagType } from '@/utils/format'
 
 const store = useAccountsStore()
 const formRef = ref<FormInstance>()
@@ -100,8 +106,9 @@ const platforms = [
 
 const platformCredentialFields: Record<string, Array<{key: string, label: string, placeholder: string, required: boolean, type?: string}>> = {
   cloudflare: [
-    { key: 'api_token', label: 'API Token', placeholder: '输入 Cloudflare API Token', required: true },
-    { key: 'email', label: 'Email (可选)', placeholder: '使用 Global Key 时需要填写', required: false },
+    { key: 'api_key', label: 'API Key', placeholder: '输入 Cloudflare Global API Key', required: true },
+    { key: 'email', label: 'Email', placeholder: '输入 Cloudflare 账户邮箱', required: true },
+    { key: 'account_id', label: 'Account ID', placeholder: '输入 Cloudflare Account ID', required: false },
   ],
   namecom: [
     { key: 'username', label: '用户名', placeholder: '输入 Name.com 用户名', required: true },
@@ -129,6 +136,7 @@ const platformCredentialFields: Record<string, Array<{key: string, label: string
   openprovider: [
     { key: 'username', label: '用户名', placeholder: '输入 OpenProvider 用户名', required: true },
     { key: 'password', label: '密码', placeholder: '输入密码', required: true, type: 'password' },
+    { key: 'ip', label: '白名单 IP', placeholder: '服务器出口 IP（如 190.92.203.219）', required: false },
   ],
   spaceship: [
     { key: 'api_key', label: 'API Key', placeholder: '输入 Spaceship API Key', required: true },
@@ -146,21 +154,6 @@ const currentCredentialFields = computed(() => {
 const rules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   name: [{ required: true, message: '请输入账户名称', trigger: 'blur' }],
-}
-
-function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger' | 'info' {
-  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
-    cloudflare: 'warning',
-    namecom: 'success',
-    dynadot: '',
-    godaddy: 'success',
-    namecheap: 'danger',
-    namesilo: 'info',
-    openprovider: 'info',
-    porkbun: 'danger',
-    spaceship: 'info',
-  }
-  return map[platform] ?? ''
 }
 
 function openDialog(row?: any) {
@@ -235,6 +228,16 @@ async function handleSyncAll() {
   }
 }
 
+function confirmDelete(row: any) {
+  ElMessageBox.confirm('确定删除该账户吗？', '确认删除', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning',
+  }).then(() => {
+    handleDelete(row)
+  }).catch(() => {})
+}
+
 async function handleDelete(row: any) {
   try {
     await deleteAccount(row.id)
@@ -252,11 +255,15 @@ onMounted(() => {
 
 <style scoped>
 .accounts-container {
-  max-width: 1200px;
+  width: 100%;
 }
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.card-header span {
+  font-size: 18px;
+  font-weight: 600;
 }
 </style>

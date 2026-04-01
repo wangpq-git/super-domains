@@ -142,11 +142,7 @@ class NamesiloAdapter(BasePlatformAdapter):
         if reply is None:
             return records
 
-        records_elem = reply.find("records")
-        if records_elem is None:
-            return records
-
-        for record_elem in records_elem.findall("resource_record"):
+        for record_elem in reply.findall("resource_record"):
             record_id_elem = record_elem.find("record_id")
             record_id = record_id_elem.text if record_id_elem is not None else ""
 
@@ -168,6 +164,13 @@ class NamesiloAdapter(BasePlatformAdapter):
                     pass
 
             priority = None
+
+            distance_elem = record_elem.find("distance")
+            if distance_elem is not None and distance_elem.text:
+                try:
+                    priority = int(distance_elem.text)
+                except Exception:
+                    pass
 
             if name == "@":
                 name = domain

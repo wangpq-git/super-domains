@@ -1,10 +1,10 @@
 <template>
   <div class="domains-container">
-    <el-card shadow="never" class="filter-card">
+    <el-card shadow="never" class="filter-card" style="margin-bottom: 0;">
       <el-form :inline="true" :model="store.filters" @submit.prevent>
         <el-form-item label="平台">
           <el-select v-model="store.filters.platform" placeholder="全部平台" clearable style="width: 160px" @change="handleFilter">
-            <el-option v-for="p in platforms" :key="p" :label="p" :value="p" />
+            <el-option v-for="p in platforms" :key="p" :label="platformLabel(p)" :value="p" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -22,12 +22,12 @@
             start-placeholder="开始日期"
             end-placeholder="结束日期"
             value-format="YYYY-MM-DD"
-            style="width: 260px"
+            style="width: 240px"
             @change="handleDateChange"
           />
         </el-form-item>
         <el-form-item label="搜索">
-          <el-input v-model="store.filters.search" placeholder="域名搜索" clearable style="width: 200px" @clear="handleFilter" @keyup.enter="handleFilter">
+          <el-input v-model="store.filters.search" placeholder="域名搜索" clearable style="width: 180px" @clear="handleFilter" @keyup.enter="handleFilter">
             <template #append><el-button :icon="Search" @click="handleFilter" /></template>
           </el-input>
         </el-form-item>
@@ -64,7 +64,7 @@
         <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip />
         <el-table-column prop="platform" label="平台" width="130">
           <template #default="{ row }">
-            <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform }}</el-tag>
+            <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="account" label="账户" width="150" show-overflow-tooltip />
@@ -138,6 +138,7 @@ import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
+import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
 interface DomainRow {
   id: number
@@ -174,21 +175,6 @@ function removeNs(idx: number) {
   nsForm.splice(idx, 1)
 }
 
-function platformTagType(platform: string): '' | 'success' | 'warning' | 'danger' | 'info' {
-  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
-    cloudflare: 'warning',
-    namecom: 'success',
-    dynadot: '',
-    godaddy: 'success',
-    namecheap: 'danger',
-    namesilo: 'info',
-    openprovider: 'info',
-    porkbun: 'danger',
-    spaceship: 'info',
-  }
-  return map[platform] ?? ''
-}
-
 function statusLabel(status: string): string {
   const map: Record<string, string> = { active: '正常', expired: '已过期', pending: '待处理', locked: '已锁定', removed: '已移除' }
   return map[status] ?? status
@@ -197,15 +183,6 @@ function statusLabel(status: string): string {
 function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
   const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = { active: 'success', expired: 'danger', pending: 'info', locked: 'warning', removed: 'info' }
   return map[status] ?? 'info'
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 function expiryClass(dateStr: string): string {
@@ -321,7 +298,10 @@ onMounted(() => {
 
 <style scoped>
 .domains-container {
-  max-width: 1200px;
+  width: 100%;
+}
+.filter-card {
+  margin-bottom: 0;
 }
 .batch-bar {
   display: flex;

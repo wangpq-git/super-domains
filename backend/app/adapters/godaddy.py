@@ -131,14 +131,26 @@ class GoDaddyAdapter(BasePlatformAdapter):
         return domains
 
     async def list_dns_records(self, domain: str) -> List[DnsRecordInfo]:
-        response = await self._request(
-            "GET",
-            f"/domains/{domain}/records"
-        )
+        all_data: list = []
+        offset = 0
+        limit = 500
+        while True:
+            response = await self._request(
+                "GET",
+                f"/domains/{domain}/records",
+                params={"offset": offset, "limit": limit}
+            )
+            if not isinstance(response, list):
+                break
+            all_data.extend(response)
+            if len(response) < limit:
+                break
+            offset += limit
 
         records = []
-        if not isinstance(response, list):
+        if not all_data:
             return records
+        response = all_data
 
         for record_data in response:
             record_type = record_data.get("type", "")

@@ -5,9 +5,12 @@
         <el-form-item label="选择域名">
           <el-select
             v-model="selectedDomainId"
-            placeholder="请选择域名"
+            placeholder="输入域名搜索"
             filterable
+            remote
+            :remote-method="handleSearch"
             clearable
+            :loading="searchLoading"
             style="width: 360px"
             @change="handleDomainChange"
           >
@@ -31,7 +34,7 @@
 
     <el-card shadow="never" style="margin-top: 16px">
       <template v-if="selectedDomainId">
-        <el-table v-loading="loading" :data="records" stripe style="width: 100%">
+        <el-table v-if="records.length > 0 || loading" v-loading="loading" :data="records" stripe style="width: 100%">
           <el-table-column prop="record_type" label="类型" width="90">
             <template #default="{ row }">
               <el-tag :type="recordTypeTag(row.record_type)" size="small">{{ row.record_type }}</el-tag>
@@ -66,6 +69,9 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-empty v-else description="该域名暂无 DNS 记录" :image-size="80">
+          <el-button type="primary" :icon="Refresh" :loading="syncing" @click="handleSync">从平台同步记录</el-button>
+        </el-empty>
       </template>
       <el-empty v-else description="请先选择域名" :image-size="100" />
     </el-card>
@@ -121,6 +127,7 @@ const selectedDomainId = ref<number | null>(null)
 const records = ref<DnsRecord[]>([])
 const loading = ref(false)
 const syncing = ref(false)
+const searchLoading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editId = ref<number | null>(null)
@@ -154,12 +161,27 @@ function recordTypeTag(type: string): '' | 'success' | 'warning' | 'danger' | 'i
   return map[type] ?? ''
 }
 
-async function fetchDomains() {
+async function fetchDomains(search?: string) {
   try {
-    const { data } = await getDomains({ page: 1, page_size: 1000 })
+    const params: any = { page: 1, page_size: 50 }
+    if (search) params.search = search
+    const { data } = await getDomains(params)
     domainList.value = data.items ?? data.data ?? []
   } catch {
     domainList.value = []
+  }
+}
+
+async function handleSearch(query: string) {
+  if (!query) {
+    domainList.value = []
+    return
+  }
+  searchLoading.value = true
+  try {
+    await fetchDomains(query)
+  } finally {
+    searchLoading.value = false
   }
 }
 
@@ -189,7 +211,11 @@ async function handleSync() {
   syncing.value = true
   try {
     const { data } = await syncDnsRecords(selectedDomainId.value)
-    ElMessage.success(`同步完成：更新 ${data.upserted} 条，移除 ${data.removed} 条`)
+    if (data.error) {
+      ElMessage.warning(`同步完成，但有错误：${data.error}`)
+    } else {
+      ElMessage.success(`同步完成：更新 ${data.upserted} 条，移除 ${data.removed} 条`)
+    }
     await fetchRecords()
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '同步失败')
@@ -263,6 +289,14 @@ onMounted(() => {
 
 <style scoped>
 .dns-manage {
-  max-width: 1200px;
+  width: 100%;
+}
+
+.selector-card {
+  margin-bottom: 0;
+}
+
+:deep(.el-empty) {
+  padding: 40px 0;
 }
 </style>

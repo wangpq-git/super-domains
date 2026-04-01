@@ -38,7 +38,12 @@ class PorkbunAdapter(BasePlatformAdapter):
             response = await self.client.request(method, url, **kwargs)
 
             if response.status_code != 200:
-                raise RuntimeError(f"Porkbun API HTTP error: {response.status_code}")
+                try:
+                    err_data = response.json()
+                    err_msg = err_data.get("message", f"HTTP {response.status_code}")
+                except Exception:
+                    err_msg = f"HTTP {response.status_code}"
+                raise RuntimeError(f"Porkbun API error: {err_msg}")
 
             try:
                 data = response.json()
