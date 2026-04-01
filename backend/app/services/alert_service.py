@@ -8,7 +8,7 @@ from app.models.alert_rule import AlertRule
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
 from app.schemas.alert_rule import AlertRuleCreate, AlertRuleUpdate
-from app.services.notification_service import send_email, send_dingtalk, send_wechat
+from app.services.notification_service import send_email, send_dingtalk, send_wechat, send_feishu
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,12 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
             for url in recipients:
                 if url.startswith("http"):
                     await send_wechat(url, markdown_body)
+                    total_notifications += 1
+
+        if "feishu" in channels and recipients:
+            for url in recipients:
+                if url.startswith("http"):
+                    await send_feishu(url, title, markdown_body)
                     total_notifications += 1
 
         if "webhook" in channels and recipients:

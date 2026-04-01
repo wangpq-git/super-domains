@@ -78,3 +78,23 @@ async def send_wechat(webhook_url: str, content: str) -> bool:
         },
     }
     return await send_webhook(webhook_url, payload)
+
+
+async def send_feishu(webhook_url: str, title: str, content: str) -> bool:
+    """发送飞书机器人消息（富文本格式）"""
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": "red"
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": content
+                }
+            ]
+        }
+    }
+    return await send_webhook(webhook_url, payload)

@@ -66,7 +66,12 @@ async def check_alerts(
 @router.get("/expiring")
 async def get_expiring_domains(
     days: int = Query(default=30, ge=1, le=365, description="Days threshold"),
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页条数"),
     db: AsyncSession = Depends(get_db),
 ):
     domains = await alert_service.get_expiring_domains(db, days=days)
-    return {"items": domains, "total": len(domains)}
+    total = len(domains)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return {"items": domains[start:end], "total": total, "page": page, "page_size": page_size}

@@ -71,6 +71,17 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="expiringTotal > expiringPageSize"
+        style="margin-top: 16px; justify-content: flex-end"
+        :current-page="expiringPage"
+        :page-size="expiringPageSize"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="expiringTotal"
+        layout="total, sizes, prev, pager, next"
+        @current-change="(val: number) => { expiringPage = val; fetchExpiring() }"
+        @size-change="(val: number) => { expiringPageSize = val; expiringPage = 1; fetchExpiring() }"
+      />
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑告警规则' : '添加告警规则'" width="560px" destroy-on-close>
@@ -91,6 +102,7 @@
             <el-checkbox label="email">邮件</el-checkbox>
             <el-checkbox label="dingtalk">钉钉</el-checkbox>
             <el-checkbox label="wechat">企业微信</el-checkbox>
+            <el-checkbox label="feishu">飞书</el-checkbox>
             <el-checkbox label="webhook">Webhook</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
@@ -138,6 +150,9 @@ import type { AlertRule, ExpiringDomain } from '@/api/alerts'
 const rules = ref<AlertRule[]>([])
 const expiringDomains = ref<ExpiringDomain[]>([])
 const expiringDays = ref(30)
+const expiringPage = ref(1)
+const expiringPageSize = ref(20)
+const expiringTotal = ref(0)
 const loading = ref(false)
 const checking = ref(false)
 const dialogVisible = ref(false)
@@ -174,7 +189,7 @@ function ruleTypeLabel(type: string): string {
 }
 
 function channelLabel(ch: string): string {
-  const map: Record<string, string> = { email: '邮件', dingtalk: '钉钉', wechat: '企业微信', webhook: 'Webhook' }
+  const map: Record<string, string> = { email: '邮件', dingtalk: '钉钉', wechat: '企业微信', feishu: '飞书', webhook: 'Webhook' }
   return map[ch] ?? ch
 }
 
@@ -182,6 +197,7 @@ function recipientPlaceholder(idx: number): string {
   const channels = form.channels
   if (channels.includes('email')) return '邮箱地址'
   if (channels.includes('dingtalk')) return '钉钉 Webhook URL'
+  if (channels.includes('feishu')) return '飞书 Webhook URL'
   if (channels.includes('wechat')) return '企业微信 Webhook URL'
   if (channels.includes('webhook')) return 'Webhook URL'
   return '接收地址'
@@ -207,10 +223,12 @@ async function fetchRules() {
 
 async function fetchExpiring() {
   try {
-    const { data } = await getExpiringDomains(expiringDays.value)
+    const { data } = await getExpiringDomains(expiringDays.value, expiringPage.value, expiringPageSize.value)
     expiringDomains.value = data.items ?? []
+    expiringTotal.value = data.total ?? 0
   } catch {
     expiringDomains.value = []
+    expiringTotal.value = 0
   }
 }
 

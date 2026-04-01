@@ -47,6 +47,6 @@ export function checkAlerts() {
   return request.post('/alerts/check')
 }
 
-export function getExpiringDomains(days: number = 30) {
-  return request.get('/alerts/expiring', { params: { days } })
+export function getExpiringDomains(days: number = 30, page = 1, pageSize = 20) {
+  return request.get('/alerts/expiring', { params: { days, page, page_size: pageSize } })
 }
