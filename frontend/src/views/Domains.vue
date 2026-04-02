@@ -63,7 +63,11 @@
         @sort-change="handleSortChange"
       >
         <el-table-column type="selection" width="50" />
-        <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom" />
+        <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom">
+          <template #default="{ row }">
+            <a class="domain-link" @click="gotoDns(row)">{{ row.domain_name }}</a>
+          </template>
+        </el-table-column>
         <el-table-column prop="platform" label="平台" width="130">
           <template #default="{ row }">
             <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
@@ -135,6 +139,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
@@ -152,6 +157,7 @@ interface DomainRow {
   [key: string]: any
 }
 
+const router = useRouter()
 const store = useDomainsStore()
 const authStore = useAuthStore()
 const dateRange = ref<string[]>([])
@@ -311,6 +317,10 @@ function handleReset() {
   store.fetchDomains()
 }
 
+function gotoDns(row: DomainRow) {
+  router.push({ path: '/dns', query: { domain: row.domain_name, domain_id: String(row.id), auto_sync: '1' } })
+}
+
 onMounted(() => {
   store.fetchDomains()
 })
@@ -366,6 +376,14 @@ onMounted(() => {
 
 .ns-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ns-tag { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.domain-link {
+  color: #4361ee;
+  cursor: pointer;
+  text-decoration: none;
+}
+.domain-link:hover {
+  text-decoration: underline;
+}
 .text-muted { color: #c0c4cc; }
 
 .pagination-wrapper {

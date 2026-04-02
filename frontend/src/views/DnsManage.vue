@@ -110,6 +110,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -125,6 +126,7 @@ import {
 import type { DnsRecord } from '@/api/dns'
 
 const authStore = useAuthStore()
+const route = useRoute()
 const domainList = ref<any[]>([])
 const selectedDomainId = ref<number | null>(null)
 const records = ref<DnsRecord[]>([])
@@ -299,8 +301,22 @@ async function handleDelete(row: DnsRecord) {
   }
 }
 
-onMounted(() => {
-  fetchDomains()
+onMounted(async () => {
+  const queryDomain = route.query.domain as string
+  const queryDomainId = route.query.domain_id as string
+  const autoSync = route.query.auto_sync as string
+
+  if (queryDomain && queryDomainId) {
+    await fetchDomains(queryDomain)
+    selectedDomainId.value = Number(queryDomainId)
+    if (autoSync === '1') {
+      await handleSync()
+    } else {
+      await fetchRecords()
+    }
+  } else {
+    await fetchDomains()
+  }
 })
 </script>
 
