@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -19,9 +20,9 @@ celery_app.conf.update(
             "task": "app.tasks.sync_tasks.sync_all_accounts",
             "schedule": 6 * 3600,
         },
-        "check-expiring-domains-daily": {
+        "check-expiring-domains-hourly": {
             "task": "app.tasks.sync_tasks.check_expiring_domains",
-            "schedule": 24 * 3600,
+            "schedule": crontab(minute=0),
         },
     },
 )

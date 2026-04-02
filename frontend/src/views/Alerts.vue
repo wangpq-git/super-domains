@@ -28,6 +28,13 @@
             <el-tag v-else type="success" size="small">🟢 提醒</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="schedule" label="发送频率" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.schedule === 'manual' ? 'info' : 'primary'">
+              {{ scheduleLabel(row.schedule) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="channels" label="通知渠道" width="200">
           <template #default="{ row }">
             <el-tag v-for="ch in (row.channels ?? [])" :key="ch" size="small" style="margin-right: 4px">{{ channelLabel(ch) }}</el-tag>
@@ -111,6 +118,14 @@
             <el-radio-button value="info"><span style="color: #67c23a">🟢 提醒</span></el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="发送频率">
+          <el-select v-model="form.schedule" style="width: 100%">
+            <el-option label="手动触发" value="manual" />
+            <el-option label="每天" value="daily" />
+            <el-option label="每周一" value="weekly_mon" />
+            <el-option label="每月1号" value="monthly_1st" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="通知渠道" prop="channels">
           <el-checkbox-group v-model="form.channels">
             <el-checkbox label="email">邮件</el-checkbox>
@@ -193,6 +208,7 @@ const defaultForm = {
   specific_platforms: [] as string[],
   excluded_platforms: [] as string[],
   severity: 'warning' as string,
+  schedule: 'manual' as string,
 }
 
 const form = reactive({ ...defaultForm })
@@ -207,6 +223,11 @@ const formRules = {
 function ruleTypeLabel(type: string): string {
   const map: Record<string, string> = { domain_expiry: '域名到期' }
   return map[type] ?? type
+}
+
+function scheduleLabel(s: string): string {
+  const map: Record<string, string> = { manual: '手动', daily: '每天', weekly_mon: '每周一', monthly_1st: '每月1号' }
+  return map[s] ?? s
 }
 
 function channelLabel(ch: string): string {
@@ -289,6 +310,7 @@ function openDialog(row?: AlertRule) {
     form.specific_platforms = [...(row.specific_platforms ?? [])]
     form.excluded_platforms = [...(row.excluded_platforms ?? [])]
     form.severity = row.severity ?? 'warning'
+    form.schedule = row.schedule ?? 'manual'
   } else {
     Object.assign(form, { ...defaultForm, channels: [], recipients: [''] })
   }
@@ -310,6 +332,7 @@ async function handleSubmit() {
       specific_platforms: form.apply_to_all ? [] : form.specific_platforms,
       excluded_platforms: form.apply_to_all ? form.excluded_platforms : [],
       severity: form.severity,
+      schedule: form.schedule,
     }
     if (isEdit.value && editId.value) {
       await updateAlertRule(editId.value, payload)

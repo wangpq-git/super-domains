@@ -14,6 +14,7 @@ class AlertRuleCreate(BaseModel):
     specific_domains: list[int] | None = None
     excluded_platforms: list[str] = Field(default_factory=list)
     severity: str = Field(default="warning", pattern="^(urgent|warning|info)$")
+    schedule: str = Field(default="manual", pattern="^(manual|daily|weekly_mon|monthly_1st)$")
 
 
 class AlertRuleUpdate(BaseModel):
@@ -28,6 +29,7 @@ class AlertRuleUpdate(BaseModel):
     specific_domains: list[int] | None = None
     excluded_platforms: list[str] | None = None
     severity: str | None = Field(None, pattern="^(urgent|warning|info)$")
+    schedule: str | None = Field(None, pattern="^(manual|daily|weekly_mon|monthly_1st)$")
 
 
 class AlertRuleResponse(BaseModel):
@@ -45,4 +47,6 @@ class AlertRuleResponse(BaseModel):
     specific_domains: list | None
     excluded_platforms: list | None
     severity: str | None
+    schedule: str | None
+    last_triggered_at: datetime | None
     created_at: datetime

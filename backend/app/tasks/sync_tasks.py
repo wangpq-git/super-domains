@@ -1,9 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.core.celery_app import celery_app
@@ -51,54 +49,12 @@ def sync_all_accounts() -> dict:
 
 @celery_app.task
 def check_expiring_domains() -> dict:
-    from app.models.domain import Domain
+    from app.services.alert_service import run_scheduled_alerts
 
-    sync_url = (
-        settings.DATABASE_URL
-        .replace("+asyncpg", "+psycopg2")
-        .replace("postgresql+asyncpg", "postgresql")
-    )
-    engine = create_engine(sync_url)
-    SyncSession = sessionmaker(engine)
+    async def _run():
+        async with AsyncSessionFactory() as db:
+            result = await run_scheduled_alerts(db)
+            logger.info("Scheduled alert check: %s", result)
+            return result
 
-    now = datetime.utcnow()
-    checks = {
-        "30_days": now + timedelta(days=30),
-        "7_days": now + timedelta(days=7),
-        "3_days": now + timedelta(days=3),
-        "1_day": now + timedelta(days=1),
-    }
-
-    session: Session = SyncSession()
-    try:
-        results = {}
-        for label, threshold in checks.items():
-            count = (
-                session.query(Domain)
-                .filter(
-                    Domain.expiry_date <= threshold,
-                    Domain.expiry_date > now,
-                    Domain.status != "removed",
-                )
-                .count()
-            )
-            results[label] = count
-
-        expired_count = (
-            session.query(Domain)
-            .filter(
-                Domain.expiry_date <= now,
-                Domain.status != "removed",
-            )
-            .count()
-        )
-        results["expired"] = expired_count
-
-        logger.info("Expiring domain check: %s", results)
-        return {
-            "checked_at": now.isoformat(),
-            "results": results,
-        }
-    finally:
-        session.close()
-        engine.dispose()
+    return asyncio.run(_run())
