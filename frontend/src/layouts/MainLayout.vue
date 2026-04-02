@@ -95,13 +95,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const authStore = useAuthStore()
 const isCollapse = ref(false)
+
+onMounted(() => {
+  if (authStore.token && !authStore.user) {
+    authStore.fetchUser()
+  }
+})
 
 const activeMenu = computed(() => route.path)
 
