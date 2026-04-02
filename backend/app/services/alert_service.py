@@ -214,15 +214,31 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
 
 
 def _should_trigger(rule, now: datetime) -> bool:
-    if rule.schedule == "manual":
+    sched = rule.schedule if isinstance(rule.schedule, dict) else {"type": "manual"}
+    stype = sched.get("type", "manual")
+
+    if stype == "manual":
         return False
+
     last = rule.last_triggered_at
-    if rule.schedule == "daily":
+
+    if stype == "daily":
         return last is None or (now - last) > timedelta(hours=23)
-    elif rule.schedule == "weekly_mon":
-        return now.weekday() == 0 and (last is None or (now - last) > timedelta(days=6))
-    elif rule.schedule == "monthly_1st":
-        return now.day == 1 and (last is None or (now - last) > timedelta(days=27))
+
+    elif stype == "weekly":
+        weekdays = sched.get("days", [])
+        py_weekday = now.weekday()
+        current_day = py_weekday + 1 if py_weekday < 6 else 0
+        if current_day not in weekdays:
+            return False
+        return last is None or (now - last) > timedelta(hours=23)
+
+    elif stype == "monthly":
+        month_days = sched.get("days", [])
+        if now.day not in month_days:
+            return False
+        return last is None or (now - last) > timedelta(hours=23)
+
     return False
 
 

@@ -28,9 +28,9 @@
             <el-tag v-else type="success" size="small">🟢 提醒</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="schedule" label="发送频率" width="110" align="center">
+        <el-table-column prop="schedule" label="发送频率" width="140" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.schedule === 'manual' ? 'info' : 'primary'">
+            <el-tag size="small" :type="(typeof row.schedule === 'object' ? row.schedule?.type : row.schedule) === 'manual' ? 'info' : 'primary'">
               {{ scheduleLabel(row.schedule) }}
             </el-tag>
           </template>
@@ -119,12 +119,26 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="发送频率">
-          <el-select v-model="form.schedule" style="width: 100%">
-            <el-option label="手动触发" value="manual" />
-            <el-option label="每天" value="daily" />
-            <el-option label="每周一" value="weekly_mon" />
-            <el-option label="每月1号" value="monthly_1st" />
-          </el-select>
+          <div style="width: 100%">
+            <el-select v-model="form.schedule.type" style="width: 100%; margin-bottom: 8px" @change="onScheduleTypeChange">
+              <el-option label="手动触发" value="manual" />
+              <el-option label="每天" value="daily" />
+              <el-option label="每周" value="weekly" />
+              <el-option label="每月" value="monthly" />
+            </el-select>
+            <el-checkbox-group v-if="form.schedule.type === 'weekly'" v-model="form.schedule.days">
+              <el-checkbox-button :value="1">周一</el-checkbox-button>
+              <el-checkbox-button :value="2">周二</el-checkbox-button>
+              <el-checkbox-button :value="3">周三</el-checkbox-button>
+              <el-checkbox-button :value="4">周四</el-checkbox-button>
+              <el-checkbox-button :value="5">周五</el-checkbox-button>
+              <el-checkbox-button :value="6">周六</el-checkbox-button>
+              <el-checkbox-button :value="0">周日</el-checkbox-button>
+            </el-checkbox-group>
+            <el-select v-if="form.schedule.type === 'monthly'" v-model="form.schedule.days" multiple placeholder="选择日期" style="width: 100%">
+              <el-option v-for="d in 28" :key="d" :label="d + '号'" :value="d" />
+            </el-select>
+          </div>
         </el-form-item>
         <el-form-item label="通知渠道" prop="channels">
           <el-checkbox-group v-model="form.channels">
@@ -208,7 +222,7 @@ const defaultForm = {
   specific_platforms: [] as string[],
   excluded_platforms: [] as string[],
   severity: 'warning' as string,
-  schedule: 'manual' as string,
+  schedule: { type: 'manual', days: [] as number[] } as { type: string; days: number[] },
 }
 
 const form = reactive({ ...defaultForm })
@@ -225,9 +239,24 @@ function ruleTypeLabel(type: string): string {
   return map[type] ?? type
 }
 
-function scheduleLabel(s: string): string {
-  const map: Record<string, string> = { manual: '手动', daily: '每天', weekly_mon: '每周一', monthly_1st: '每月1号' }
-  return map[s] ?? s
+function scheduleLabel(s: any): string {
+  if (!s || typeof s === 'string') {
+    const map: Record<string, string> = { manual: '手动', daily: '每天', weekly_mon: '每周一', monthly_1st: '每月1号' }
+    return map[s] ?? String(s)
+  }
+  const t = s.type
+  if (t === 'manual') return '手动'
+  if (t === 'daily') return '每天'
+  if (t === 'weekly') {
+    const dayNames = ['日', '一', '二', '三', '四', '五', '六']
+    const days = (s.days || []).map((d: number) => '周' + dayNames[d]).join('、')
+    return days || '每周'
+  }
+  if (t === 'monthly') {
+    const days = (s.days || []).map((d: number) => d + '号').join('、')
+    return days || '每月'
+  }
+  return '手动'
 }
 
 function channelLabel(ch: string): string {
@@ -296,6 +325,10 @@ async function handleToggle(row: AlertRule) {
   }
 }
 
+function onScheduleTypeChange() {
+  form.schedule.days = []
+}
+
 function openDialog(row?: AlertRule) {
   isEdit.value = !!row
   editId.value = row?.id ?? null
@@ -310,9 +343,10 @@ function openDialog(row?: AlertRule) {
     form.specific_platforms = [...(row.specific_platforms ?? [])]
     form.excluded_platforms = [...(row.excluded_platforms ?? [])]
     form.severity = row.severity ?? 'warning'
-    form.schedule = row.schedule ?? 'manual'
+    const sched = row.schedule ?? { type: 'manual' }
+    form.schedule = { type: (typeof sched === 'object' ? sched.type : sched) || 'manual', days: [...((typeof sched === 'object' ? sched.days : undefined) || [])] }
   } else {
-    Object.assign(form, { ...defaultForm, channels: [], recipients: [''] })
+    Object.assign(form, { ...defaultForm, channels: [], recipients: [''], schedule: { type: 'manual', days: [] } })
   }
   dialogVisible.value = true
 }
