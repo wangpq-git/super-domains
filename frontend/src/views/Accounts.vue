@@ -20,13 +20,13 @@
         </el-table-column>
         <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
-        <el-table-column prop="last_sync_at" label="最后同步" width="180" sortable="custom">
+        <el-table-column prop="last_sync_at" label="最后同步" width="200" sortable="custom">
           <template #default="{ row }">{{ row.last_sync_at ? formatDateTime(row.last_sync_at) : '从未同步' }}</template>
         </el-table-column>
         <el-table-column prop="sync_status" label="同步状态" width="110" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.sync_status === 'success'" type="success" size="small">成功</el-tag>
-            <el-tag v-else-if="row.sync_status === 'failed'" type="danger" size="small">失败</el-tag>
+            <el-tag v-else-if="row.sync_status === 'failed' || row.sync_status === 'error'" type="danger" size="small">失败</el-tag>
             <el-tag v-else-if="row.sync_status === 'syncing'" type="primary" size="small">同步中</el-tag>
             <el-tag v-else type="info" size="small">未知</el-tag>
           </template>
@@ -49,6 +49,19 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-wrapper">
+        <el-pagination
+          v-model:current-page="store.page"
+          v-model:page-size="store.pageSize"
+          :total="store.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          @size-change="handleSizeChange"
+          @current-change="store.fetchAccounts()"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑账户' : '添加账户'" width="500px" destroy-on-close>
@@ -160,6 +173,7 @@ const rules = {
 }
 
 function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  store.page = 1
   if (order) {
     store.sortBy = prop
     store.sortOrder = order === 'ascending' ? 'asc' : 'desc'
@@ -171,6 +185,11 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 }
 
 function handleRefresh() {
+  store.fetchAccounts()
+}
+
+function handleSizeChange() {
+  store.page = 1
   store.fetchAccounts()
 }
 
@@ -235,8 +254,8 @@ async function handleSyncAll() {
   syncingAll.value = true
   try {
     const { data } = await syncAllAccounts()
-    const success = data.results?.filter((r: any) => r.status === 'success').length ?? 0
-    const failed = data.results?.filter((r: any) => r.status === 'failed').length ?? 0
+    const success = data.results?.filter((r: any) => r.status === 'success' || !r.error).length ?? data.success ?? 0
+    const failed = data.results?.filter((r: any) => r.status === 'failed' || !!r.error).length ?? data.failed ?? 0
     ElMessage.success(`同步完成: ${success} 成功, ${failed} 失败`)
     store.fetchAccounts()
   } catch (e: any) {
@@ -283,5 +302,10 @@ onMounted(() => {
 .card-header span {
   font-size: 18px;
   font-weight: 600;
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

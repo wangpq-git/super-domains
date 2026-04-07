@@ -28,3 +28,10 @@ class PlatformAccountResponse(BaseModel):
     sync_error: str | None
     domain_count: int = 0
     created_at: datetime
+
+
+class PlatformAccountListResponse(BaseModel):
+    items: list[PlatformAccountResponse]
+    total: int
+    page: int
+    page_size: int

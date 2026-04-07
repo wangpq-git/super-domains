@@ -4,19 +4,28 @@ import { getAccounts } from '@/api/accounts'
 
 export const useAccountsStore = defineStore('accounts', () => {
   const accounts = ref<any[]>([])
+  const total = ref(0)
   const loading = ref(false)
   const sortBy = ref('created_at')
   const sortOrder = ref('desc')
+  const page = ref(1)
+  const pageSize = ref(20)
 
   async function fetchAccounts() {
     loading.value = true
     try {
-      const { data } = await getAccounts({ sort_by: sortBy.value, sort_order: sortOrder.value })
+      const { data } = await getAccounts({
+        sort_by: sortBy.value,
+        sort_order: sortOrder.value,
+        page: page.value,
+        page_size: pageSize.value,
+      })
       accounts.value = data.items ?? data.data ?? data ?? []
+      total.value = data.total ?? accounts.value.length
     } finally {
       loading.value = false
     }
   }
 
-  return { accounts, loading, sortBy, sortOrder, fetchAccounts }
+  return { accounts, total, loading, sortBy, sortOrder, page, pageSize, fetchAccounts }
 })

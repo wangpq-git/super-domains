@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime
 
@@ -33,7 +32,7 @@ async def sync_account(db: AsyncSession, account_id: int) -> dict:
         async with adapter_cls:
             domains_info = await adapter_cls.list_domains()
     except Exception as e:
-        account.sync_status = "error"
+        account.sync_status = "failed"
         account.sync_error = str(e)
         await db.commit()
         raise
@@ -107,6 +106,8 @@ async def sync_account(db: AsyncSession, account_id: int) -> dict:
     return {
         "account_id": account.id,
         "platform": account.platform,
+        "account_name": account.account_name,
+        "status": "success",
         "upserted": upserted,
         "removed": removed_count,
     }
@@ -128,6 +129,8 @@ async def sync_all_accounts(db: AsyncSession) -> list[dict]:
             results.append({
                 "account_id": account.id,
                 "platform": account.platform,
+                "account_name": account.account_name,
+                "status": "failed",
                 "error": str(e),
             })
 

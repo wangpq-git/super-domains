@@ -7,7 +7,7 @@ export interface AccountData {
   config?: Record<string, any>
 }
 
-export function getAccounts(params?: { sort_by?: string; sort_order?: string }) {
+export function getAccounts(params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number }) {
   return request.get('/platforms', { params })
 }
 
@@ -32,5 +32,5 @@ export function syncAccount(id: number) {
 }
 
 export function syncAllAccounts() {
-  return request.post('/platforms/sync-all')
+  return request.post('/platforms/sync-all', null, { timeout: 300000 })
 }

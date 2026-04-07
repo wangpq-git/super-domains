@@ -23,10 +23,11 @@ export function platformLabel(key: string): string {
 /** Format ISO datetime string to friendly format: YYYY-MM-DD HH:mm */
 export function formatDateTime(isoStr: string | null | undefined): string {
   if (!isoStr) return '-'
-  const d = new Date(isoStr)
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(isoStr) ? isoStr : `${isoStr}Z`
+  const d = new Date(normalized)
   if (isNaN(d.getTime())) return isoStr
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 /** Format ISO date string to YYYY-MM-DD */

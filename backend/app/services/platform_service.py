@@ -1,4 +1,4 @@
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_account import PlatformAccount
@@ -7,13 +7,22 @@ from app.schemas.platform_account import PlatformAccountCreate, PlatformAccountU
 from app.core.encryption import encrypt_credentials
 
 
-async def list_accounts(db: AsyncSession, sort_by: str = "created_at", sort_order: str = "desc") -> list[dict]:
+async def list_accounts(
+    db: AsyncSession,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
     ALLOWED_SORT_FIELDS = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
     if sort_by in ALLOWED_SORT_FIELDS:
         col = getattr(PlatformAccount, sort_by)
         order_col = col.desc() if sort_order == "desc" else col.asc()
     else:
         order_col = PlatformAccount.created_at.desc()
+
+    total_result = await db.execute(select(func.count()).select_from(PlatformAccount))
+    total = total_result.scalar_one()
 
     result = await db.execute(
         select(
@@ -30,8 +39,15 @@ async def list_accounts(db: AsyncSession, sort_by: str = "created_at", sort_orde
         .outerjoin(Domain, Domain.account_id == PlatformAccount.id)
         .group_by(PlatformAccount.id)
         .order_by(order_col)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return [row._asdict() for row in result.all()]
+    return {
+        "items": [row._asdict() for row in result.all()],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 async def create_account(db: AsyncSession, data: PlatformAccountCreate, user_id: int) -> PlatformAccount:

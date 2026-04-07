@@ -9,19 +9,28 @@ from app.schemas.platform_account import (
     PlatformAccountCreate,
     PlatformAccountUpdate,
     PlatformAccountResponse,
+    PlatformAccountListResponse,
 )
 from app.services import platform_service
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[PlatformAccountResponse])
+@router.get("", response_model=PlatformAccountListResponse)
 async def list_platforms(
     sort_by: str = Query("created_at", description="排序字段"),
     sort_order: str = Query("desc", description="排序方向 asc/desc"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await platform_service.list_accounts(db, sort_by=sort_by, sort_order=sort_order)
+    rows = await platform_service.list_accounts(
+        db,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+    )
     return rows
 
 
@@ -151,7 +160,7 @@ async def sync_all_accounts(current_user: User = Depends(get_current_user), db: 
     from app.services.sync_service import sync_all_accounts as do_sync_all
 
     results = await do_sync_all(db)
-    success_count = sum(1 for r in results if "error" not in r)
+    success_count = sum(1 for r in results if r.get("status") == "success")
     failed_count = len(results) - success_count
     return {
         "total": len(results),
