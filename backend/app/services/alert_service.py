@@ -38,6 +38,9 @@ async def create_alert_rule(db: AsyncSession, data: AlertRuleCreate, user_id: in
         apply_to_all=data.apply_to_all,
         specific_platforms=data.specific_platforms,
         specific_domains=data.specific_domains,
+        excluded_platforms=data.excluded_platforms,
+        severity=data.severity,
+        schedule=data.schedule,
         created_by=user_id,
     )
     db.add(rule)
@@ -255,8 +258,8 @@ async def run_scheduled_alerts(db: AsyncSession) -> dict:
         if result > 0:
             triggered += 1
             total_notifications += result
-        rule.last_triggered_at = now
-        await db.commit()
+            rule.last_triggered_at = now
+            await db.commit()
 
     logger.info("Scheduled alert check: triggered=%d, notifications=%d", triggered, total_notifications)
     return {"triggered_rules": triggered, "notifications_sent": total_notifications}

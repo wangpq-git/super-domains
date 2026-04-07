@@ -7,6 +7,7 @@ celery_app = Celery(
     "domain_manage",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
+    include=["app.tasks.sync_tasks"],
 )
 
 celery_app.conf.update(
