@@ -6,31 +6,41 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.db.base import Base
 
 logger = logging.getLogger(__name__)
 
-async_engine = create_async_engine(settings.DATABASE_URL)
-AsyncSessionFactory = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+def create_session_factory():
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    return engine, session_factory
 
 
 async def _run_sync_account(account_id: int) -> dict:
     from app.services.sync_service import sync_account
 
-    async with AsyncSessionFactory() as db:
-        try:
-            result = await sync_account(db, account_id)
-            return result
-        except Exception:
-            await db.rollback()
-            raise
+    engine, session_factory = create_session_factory()
+    try:
+        async with session_factory() as db:
+            try:
+                result = await sync_account(db, account_id)
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+    finally:
+        await engine.dispose()
 
 
 async def _run_sync_all() -> dict:
     from app.services.sync_service import sync_all_accounts as _sync_all
 
-    async with AsyncSessionFactory() as db:
-        return await _sync_all(db)
+    engine, session_factory = create_session_factory()
+    try:
+        async with session_factory() as db:
+            return await _sync_all(db)
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task
@@ -52,9 +62,13 @@ def check_expiring_domains() -> dict:
     from app.services.alert_service import run_scheduled_alerts
 
     async def _run():
-        async with AsyncSessionFactory() as db:
-            result = await run_scheduled_alerts(db)
-            logger.info("Scheduled alert check: %s", result)
-            return result
+        engine, session_factory = create_session_factory()
+        try:
+            async with session_factory() as db:
+                result = await run_scheduled_alerts(db)
+                logger.info("Scheduled alert check: %s", result)
+                return result
+        finally:
+            await engine.dispose()
 
     return asyncio.run(_run())
