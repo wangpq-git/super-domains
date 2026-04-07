@@ -89,6 +89,8 @@ FEISHU_SEVERITY_MAP = {
     "info": {"icon": "🟢", "label": "提醒", "color": "green"},
 }
 
+FEISHU_MAX_DOMAIN_LINES = 20
+
 
 async def send_feishu(webhook_url: str, title: str, domains: list[dict], severity: str = "warning") -> bool:
     """发送飞书机器人消息（卡片格式，按告警等级显示颜色）"""
@@ -96,7 +98,8 @@ async def send_feishu(webhook_url: str, title: str, domains: list[dict], severit
 
     lines = [f"**{sev['icon']} {sev['label']}** · 共 **{len(domains)}** 个域名"]
     lines.append("")
-    for d in domains:
+    visible_domains = domains[:FEISHU_MAX_DOMAIN_LINES]
+    for d in visible_domains:
         days = d["days_left"]
         if days <= 3:
             days_text = f"**🔥 {days}天**"
@@ -108,6 +111,10 @@ async def send_feishu(webhook_url: str, title: str, domains: list[dict], severit
             f"• {d['domain_name']}　`{d['platform'] or '-'}`　"
             f"{d['expiry_date'].strftime('%m-%d')}　{days_text}"
         )
+    hidden_count = len(domains) - len(visible_domains)
+    if hidden_count > 0:
+        lines.append("")
+        lines.append(f"其余 **{hidden_count}** 个域名已省略，请到系统中查看完整清单。")
 
     elements = [
         {"tag": "markdown", "content": "\n".join(lines)},

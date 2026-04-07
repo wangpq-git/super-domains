@@ -13,6 +13,17 @@ from app.services.notification_service import send_email, send_dingtalk, send_we
 logger = logging.getLogger(__name__)
 
 
+def _serialize_domains_for_webhook(domains: list[dict]) -> list[dict]:
+    serialized = []
+    for domain in domains:
+        item = dict(domain)
+        expiry_date = item.get("expiry_date")
+        if hasattr(expiry_date, "isoformat"):
+            item["expiry_date"] = expiry_date.isoformat()
+        serialized.append(item)
+    return serialized
+
+
 async def get_alert_rules(db: AsyncSession) -> list[AlertRule]:
     result = await db.execute(
         select(AlertRule).order_by(AlertRule.created_at.desc())
@@ -183,7 +194,7 @@ async def _process_single_rule(db: AsyncSession, rule, now: datetime) -> int:
                 payload = {
                     "title": title,
                     "rule_id": rule.id,
-                    "domains": domains_to_alert,
+                    "domains": _serialize_domains_for_webhook(domains_to_alert),
                     "checked_at": now.isoformat(),
                 }
                 from app.services.notification_service import send_webhook

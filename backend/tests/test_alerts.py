@@ -112,3 +112,68 @@ async def test_manual_alert_check_continues_after_single_rule_exception(async_se
     assert result["checked"] is True
     assert result["rules_checked"] == 2
     assert result["notifications_sent"] == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_payload_serializes_expiry_date(async_session, monkeypatch):
+    await _seed_domain(async_session)
+
+    captured = {}
+    rule = AlertRule(
+        name="webhook-expiry",
+        rule_type="domain_expiry",
+        days_before=7,
+        is_enabled=True,
+        channels=["webhook"],
+        recipients=["https://example.invalid/hook"],
+        apply_to_all=True,
+        excluded_platforms=[],
+        severity="warning",
+        schedule={"type": "manual"},
+    )
+    async_session.add(rule)
+    await async_session.commit()
+
+    async def fake_send_webhook(url, payload):
+        captured["payload"] = payload
+        return True
+
+    monkeypatch.setattr(notification_service, "send_webhook", fake_send_webhook)
+
+    result = await alert_service.check_expiring_domains(async_session)
+
+    assert result["notifications_sent"] == 1
+    assert isinstance(captured["payload"]["domains"][0]["expiry_date"], str)
+
+
+@pytest.mark.asyncio
+async def test_feishu_payload_truncates_long_domain_list(monkeypatch):
+    captured = {}
+
+    async def fake_send_webhook(url, payload):
+        captured["payload"] = payload
+        return True
+
+    monkeypatch.setattr(notification_service, "send_webhook", fake_send_webhook)
+
+    domains = [
+        {
+            "domain_name": f"example{i}.com",
+            "platform": "namecom",
+            "expiry_date": datetime.utcnow() + timedelta(days=i + 1),
+            "days_left": i + 1,
+        }
+        for i in range(25)
+    ]
+
+    ok = await notification_service.send_feishu(
+        "https://example.invalid/hook",
+        "Alert",
+        domains,
+        "warning",
+    )
+
+    content = captured["payload"]["card"]["elements"][0]["content"]
+    assert ok is True
+    assert "example24.com" not in content
+    assert "其余 **5** 个域名已省略" in content
