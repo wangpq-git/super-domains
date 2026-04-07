@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,16 @@ def _serialize_domains_for_webhook(domains: list[dict]) -> list[dict]:
             item["expiry_date"] = expiry_date.isoformat()
         serialized.append(item)
     return serialized
+
+
+def _parse_schedule_time(raw_value) -> time:
+    if isinstance(raw_value, str):
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                return datetime.strptime(raw_value, fmt).time()
+            except ValueError:
+                continue
+    return time(9, 0, 0)
 
 
 async def get_alert_rules(db: AsyncSession) -> list[AlertRule]:
@@ -235,14 +245,19 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
 def _should_trigger(rule, now: datetime) -> bool:
     sched = rule.schedule if isinstance(rule.schedule, dict) else {"type": "manual"}
     stype = sched.get("type", "manual")
+    scheduled_time = _parse_schedule_time(sched.get("time"))
 
     if stype == "manual":
         return False
 
     last = rule.last_triggered_at
+    today_trigger_at = datetime.combine(now.date(), scheduled_time)
+
+    if now < today_trigger_at:
+        return False
 
     if stype == "daily":
-        return last is None or (now - last) > timedelta(hours=23)
+        return last is None or last < today_trigger_at
 
     elif stype == "weekly":
         weekdays = sched.get("days", [])
@@ -250,20 +265,20 @@ def _should_trigger(rule, now: datetime) -> bool:
         current_day = py_weekday + 1 if py_weekday < 6 else 0
         if current_day not in weekdays:
             return False
-        return last is None or (now - last) > timedelta(hours=23)
+        return last is None or last < today_trigger_at
 
     elif stype == "monthly":
         month_days = sched.get("days", [])
         if now.day not in month_days:
             return False
-        return last is None or (now - last) > timedelta(hours=23)
+        return last is None or last < today_trigger_at
 
     return False
 
 
 async def run_scheduled_alerts(db: AsyncSession) -> dict:
     rules = await get_alert_rules(db)
-    now = datetime.utcnow()
+    now = datetime.now()
     triggered = 0
     total_notifications = 0
 

@@ -138,6 +138,14 @@
             <el-select v-if="form.schedule.type === 'monthly'" v-model="form.schedule.days" multiple placeholder="选择日期" style="width: 100%">
               <el-option v-for="d in 28" :key="d" :label="d + '号'" :value="d" />
             </el-select>
+            <el-time-picker
+              v-if="form.schedule.type !== 'manual'"
+              v-model="form.schedule.time"
+              style="width: 100%; margin-top: 8px"
+              format="HH:mm:ss"
+              value-format="HH:mm:ss"
+              placeholder="选择发送时间"
+            />
           </div>
         </el-form-item>
         <el-form-item label="通知渠道" prop="channels">
@@ -222,7 +230,7 @@ const defaultForm = {
   specific_platforms: [] as string[],
   excluded_platforms: [] as string[],
   severity: 'warning' as string,
-  schedule: { type: 'manual', days: [] as number[] } as { type: string; days: number[] },
+  schedule: { type: 'manual', days: [], time: '09:00:00' } as { type: string; days: number[]; time: string },
 }
 
 const form = reactive({ ...defaultForm })
@@ -246,15 +254,16 @@ function scheduleLabel(s: any): string {
   }
   const t = s.type
   if (t === 'manual') return '手动'
-  if (t === 'daily') return '每天'
+  const timeText = s.time ? ` ${s.time}` : ''
+  if (t === 'daily') return `每天${timeText}`
   if (t === 'weekly') {
     const dayNames = ['日', '一', '二', '三', '四', '五', '六']
     const days = (s.days || []).map((d: number) => '周' + dayNames[d]).join('、')
-    return days || '每周'
+    return `${days || '每周'}${timeText}`
   }
   if (t === 'monthly') {
     const days = (s.days || []).map((d: number) => d + '号').join('、')
-    return days || '每月'
+    return `${days || '每月'}${timeText}`
   }
   return '手动'
 }
@@ -327,6 +336,9 @@ async function handleToggle(row: AlertRule) {
 
 function onScheduleTypeChange() {
   form.schedule.days = []
+  if (!form.schedule.time) {
+    form.schedule.time = '09:00:00'
+  }
 }
 
 function openDialog(row?: AlertRule) {
@@ -344,9 +356,13 @@ function openDialog(row?: AlertRule) {
     form.excluded_platforms = [...(row.excluded_platforms ?? [])]
     form.severity = row.severity ?? 'warning'
     const sched = row.schedule ?? { type: 'manual' }
-    form.schedule = { type: (typeof sched === 'object' ? sched.type : sched) || 'manual', days: [...((typeof sched === 'object' ? sched.days : undefined) || [])] }
+    form.schedule = {
+      type: (typeof sched === 'object' ? sched.type : sched) || 'manual',
+      days: [...((typeof sched === 'object' ? sched.days : undefined) || [])],
+      time: (typeof sched === 'object' ? sched.time : undefined) || '09:00:00',
+    }
   } else {
-    Object.assign(form, { ...defaultForm, channels: [], recipients: [''], schedule: { type: 'manual', days: [] } })
+    Object.assign(form, { ...defaultForm, channels: [], recipients: [''], schedule: { type: 'manual', days: [], time: '09:00:00' } })
   }
   dialogVisible.value = true
 }

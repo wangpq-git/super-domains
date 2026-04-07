@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -175,5 +176,35 @@ async def test_feishu_payload_truncates_long_domain_list(monkeypatch):
 
     content = captured["payload"]["card"]["elements"][0]["content"]
     assert ok is True
+    assert "服务商" in content
+    assert "剩余天数" in content
     assert "example24.com" not in content
     assert "其余 **5** 个域名已省略" in content
+
+
+def test_should_trigger_weekly_respects_schedule_time():
+    rule = SimpleNamespace(
+        schedule={"type": "weekly", "days": [1], "time": "18:00:00"},
+        last_triggered_at=None,
+    )
+
+    monday_1759 = datetime(2026, 4, 6, 17, 59, 59)
+    monday_1800 = datetime(2026, 4, 6, 18, 0, 0)
+
+    assert alert_service._should_trigger(rule, monday_1759) is False
+    assert alert_service._should_trigger(rule, monday_1800) is True
+
+
+def test_should_trigger_daily_only_once_after_scheduled_time():
+    rule = SimpleNamespace(
+        schedule={"type": "daily", "time": "18:00:00"},
+        last_triggered_at=datetime(2026, 4, 6, 18, 5, 0),
+    )
+
+    same_day_later = datetime(2026, 4, 6, 18, 30, 0)
+    next_day_before = datetime(2026, 4, 7, 17, 59, 59)
+    next_day_at = datetime(2026, 4, 7, 18, 0, 0)
+
+    assert alert_service._should_trigger(rule, same_day_later) is False
+    assert alert_service._should_trigger(rule, next_day_before) is False
+    assert alert_service._should_trigger(rule, next_day_at) is True

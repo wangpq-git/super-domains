@@ -14,7 +14,7 @@ class AlertRuleCreate(BaseModel):
     specific_domains: list[int] | None = None
     excluded_platforms: list[str] = Field(default_factory=list)
     severity: str = Field(default="warning", pattern="^(urgent|warning|info)$")
-    schedule: dict = Field(default_factory=lambda: {"type": "manual"})
+    schedule: dict = Field(default_factory=lambda: {"type": "manual", "time": "09:00:00"})
 
 
 class AlertRuleUpdate(BaseModel):

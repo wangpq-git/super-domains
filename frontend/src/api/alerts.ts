@@ -1,5 +1,11 @@
 import request from './request'
 
+export interface AlertSchedule {
+  type: string
+  days?: number[]
+  time?: string
+}
+
 export interface AlertRuleData {
   name: string
   rule_type: string
@@ -10,10 +16,14 @@ export interface AlertRuleData {
   apply_to_all?: boolean
   specific_platforms?: string[]
   specific_domains?: number[]
+  excluded_platforms?: string[]
+  severity?: 'urgent' | 'warning' | 'info'
+  schedule?: AlertSchedule
 }
 
 export interface AlertRule extends AlertRuleData {
   id: number
+  last_triggered_at?: string | null
   created_at: string
 }
 
