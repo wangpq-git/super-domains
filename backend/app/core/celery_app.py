@@ -23,7 +23,7 @@ celery_app.conf.update(
         },
         "check-expiring-domains-hourly": {
             "task": "app.tasks.sync_tasks.check_expiring_domains",
-            "schedule": crontab(minute=0),
+            "schedule": crontab(minute="*"),
         },
     },
 )

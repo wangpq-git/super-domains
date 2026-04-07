@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,11 @@ from app.schemas.alert_rule import AlertRuleCreate, AlertRuleUpdate
 from app.services.notification_service import send_email, send_dingtalk, send_wechat, send_feishu
 
 logger = logging.getLogger(__name__)
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _beijing_now_naive() -> datetime:
+    return datetime.now(BEIJING_TZ).replace(tzinfo=None)
 
 
 def _serialize_domains_for_webhook(domains: list[dict]) -> list[dict]:
@@ -221,7 +227,7 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
     if not enabled_rules:
         return {"checked": True, "notifications_sent": 0, "message": "No enabled expiry rules"}
 
-    now = datetime.utcnow()
+    now = _beijing_now_naive()
     total_notifications = 0
 
     for rule in enabled_rules:
@@ -278,7 +284,7 @@ def _should_trigger(rule, now: datetime) -> bool:
 
 async def run_scheduled_alerts(db: AsyncSession) -> dict:
     rules = await get_alert_rules(db)
-    now = datetime.now()
+    now = _beijing_now_naive()
     triggered = 0
     total_notifications = 0
 
