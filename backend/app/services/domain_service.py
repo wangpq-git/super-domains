@@ -2,11 +2,12 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
+from app.services.dns_eligibility import dns_manageable_clause, non_expired_domain_clause
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,8 @@ async def list_domains(
     search: Optional[str] = None,
     expiry_start: Optional[str] = None,
     expiry_end: Optional[str] = None,
+    exclude_expired: bool = False,
+    dns_manageable_only: bool = False,
     sort_by: str = "expiry_date",
     sort_order: str = "asc",
     page: int = 1,
@@ -73,6 +76,16 @@ async def list_domains(
     if expiry_end:
         query = query.where(Domain.expiry_date <= expiry_end)
         count_query = count_query.where(Domain.expiry_date <= expiry_end)
+
+    if exclude_expired:
+        clause = non_expired_domain_clause()
+        query = query.where(clause)
+        count_query = count_query.where(clause)
+
+    if dns_manageable_only:
+        clause = dns_manageable_clause()
+        query = query.where(clause)
+        count_query = count_query.where(clause)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0

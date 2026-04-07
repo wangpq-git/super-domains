@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +9,7 @@ from app.models.dns_record import DnsRecord
 from app.adapters import get_adapter
 from app.core.encryption import decrypt_credentials
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
+from app.services.dns_eligibility import is_dns_managed_by_account
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ async def sync_dns_records(db: AsyncSession, domain_id: int) -> dict:
     domain = await _get_domain_with_account(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
+    if not is_dns_managed_by_account(domain):
+        raise RuntimeError("当前域名未过期，但 NS 不在当前账户下，已跳过同步")
 
     account = domain.account
     credentials = decrypt_credentials(account.credentials)

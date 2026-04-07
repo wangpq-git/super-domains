@@ -171,7 +171,12 @@ function recordTypeTag(type: string): '' | 'success' | 'warning' | 'danger' | 'i
 
 async function fetchDomains(search?: string) {
   try {
-    const params: any = { page: 1, page_size: 50 }
+    const params: any = {
+      page: 1,
+      page_size: 50,
+      exclude_expired: true,
+      dns_manageable_only: true,
+    }
     if (search) params.search = search
     const { data } = await getDomains(params)
     domainList.value = data.items ?? data.data ?? []
