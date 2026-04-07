@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -6,6 +7,12 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+FEISHU_SEVERITY_MAP = {
+    "urgent": {"icon": "🔴", "label": "紧急", "color": "red"},
+    "warning": {"icon": "🟡", "label": "警告", "color": "orange"},
+    "info": {"icon": "🟢", "label": "提醒", "color": "green"},
+}
 
 
 async def send_email(recipients: list[str], subject: str, body: str) -> bool:
@@ -20,8 +27,8 @@ async def send_email(recipients: list[str], subject: str, body: str) -> bool:
         return False
 
     import aiosmtplib
-    from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
     sent = 0
 
@@ -55,6 +62,20 @@ async def send_webhook(url: str, payload: dict) -> bool:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
+
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" in content_type:
+                data = resp.json()
+                if isinstance(data, dict) and data.get("code") not in (None, 0):
+                    logger.error(
+                        "Webhook business error from %s: code=%s msg=%s payload=%s",
+                        url,
+                        data.get("code"),
+                        data.get("msg"),
+                        payload,
+                    )
+                    return False
+
             logger.info("Webhook sent to %s: status=%d", url, resp.status_code)
             return True
     except Exception as e:
@@ -83,15 +104,6 @@ async def send_wechat(webhook_url: str, content: str) -> bool:
     return await send_webhook(webhook_url, payload)
 
 
-FEISHU_SEVERITY_MAP = {
-    "urgent": {"icon": "🔴", "label": "紧急", "color": "red"},
-    "warning": {"icon": "🟡", "label": "警告", "color": "orange"},
-    "info": {"icon": "🟢", "label": "提醒", "color": "green"},
-}
-
-FEISHU_PAGE_SIZE = 10
-
-
 def _trim_text(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
@@ -100,127 +112,74 @@ def _trim_text(value: str, limit: int) -> str:
     return value[: limit - 1] + "…"
 
 
-def _build_feishu_columns(
-    provider: str,
-    domain_name: str,
-    expiry_date: str,
-    status_text: str,
-    bold: bool = False,
-) -> dict:
-    text_tag = "lark_md" if bold else "plain_text"
-    if bold:
-        provider = f"**{provider}**"
-        domain_name = f"**{domain_name}**"
-        expiry_date = f"**{expiry_date}**"
-        status_text = f"**{status_text}**"
+def _build_feishu_template_rows(domains: list[dict]) -> list[dict]:
+    rows = []
+    for index, domain in enumerate(domains, start=1):
+        provider = _trim_text(str(domain.get("platform") or "-"), 18)
+        domain_name = _trim_text(str(domain.get("domain_name") or "-"), 64)
+        expiry_date = domain["expiry_date"].strftime("%Y-%m-%d")
+        days_left = int(domain.get("days_left") or 0)
+        status_text = f"剩余{days_left}天"
 
-    return {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "columns": [
+        rows.append(
             {
-                "tag": "column",
-                "width": "weighted",
-                "weight": 25,
-                "elements": [{"tag": text_tag, "content": provider}],
-            },
-            {
-                "tag": "column",
-                "width": "weighted",
-                "weight": 35,
-                "elements": [{"tag": text_tag, "content": domain_name}],
-            },
-            {
-                "tag": "column",
-                "width": "weighted",
-                "weight": 22,
-                "elements": [{"tag": text_tag, "content": expiry_date}],
-            },
-            {
-                "tag": "column",
-                "width": "weighted",
-                "weight": 18,
-                "elements": [{"tag": text_tag, "content": status_text}],
-            },
-        ],
-    }
+                "index": index,
+                "provider": provider,
+                "platform": provider,
+                "domain": domain_name,
+                "domain_name": domain_name,
+                "expiry_date": expiry_date,
+                "expiryDate": expiry_date,
+                "status": status_text,
+                "days_left": days_left,
+                "daysLeft": days_left,
+                "remaining_days": days_left,
+                "remainingDays": days_left,
+            }
+        )
+
+    return rows
 
 
-def _build_feishu_page_card(
+def _build_feishu_template_card(
     title: str,
     domains: list[dict],
     severity: str,
-    page: int,
-    total_pages: int,
-    total_domains: int,
 ) -> dict:
     sev = FEISHU_SEVERITY_MAP.get(severity, FEISHU_SEVERITY_MAP["warning"])
+    variable_name = settings.FEISHU_CARD_TABLE_VARIABLE
+    rows = _build_feishu_template_rows(domains)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    elements = [
-        {
-            "tag": "markdown",
-            "content": f"**{sev['icon']} {sev['label']}** · 共 **{total_domains}** 个域名",
-        },
-        {"tag": "hr"},
-        _build_feishu_columns("服务商", "域名", "到期时间", "状态", bold=True),
-    ]
-
-    for domain in domains:
-        provider = _trim_text(str(domain["platform"] or "-"), 18)
-        domain_name = _trim_text(str(domain["domain_name"]), 32)
-        expiry_date = domain["expiry_date"].strftime("%Y-%m-%d")
-        status_text = f"剩余{domain['days_left']}天"
-        elements.append({"tag": "hr"})
-        elements.append(_build_feishu_columns(provider, domain_name, expiry_date, status_text))
-
-    elements.extend([
-        {"tag": "hr"},
-        {
-            "tag": "note",
-            "elements": [
-                {"tag": "plain_text", "content": f"第 {page} / {total_pages} 页 · 每页 10 条"},
-                {"tag": "plain_text", "content": "域名管理平台"},
-            ],
-        },
-    ])
+    template_variable = {
+        variable_name: rows,
+        "title": title,
+        "card_title": title,
+        "severity": sev["label"],
+        "severity_label": sev["label"],
+        "severity_icon": sev["icon"],
+        "total": len(domains),
+        "total_count": len(domains),
+        "updated_at": now_str,
+    }
 
     return {
         "msg_type": "interactive",
         "card": {
-            "header": {
-                "title": {
-                    "tag": "plain_text",
-                    "content": title if total_pages == 1 else f"{title}（第 {page}/{total_pages} 页）",
-                },
-                "template": sev["color"],
+            "type": "template",
+            "data": {
+                "template_id": settings.FEISHU_CARD_TEMPLATE_ID,
+                "template_version_name": settings.FEISHU_CARD_TEMPLATE_VERSION,
+                "template_variable": template_variable,
             },
-            "elements": elements,
         },
     }
 
 
 async def send_feishu(webhook_url: str, title: str, domains: list[dict], severity: str = "warning") -> bool:
-    """发送飞书机器人消息（卡片分页样式）"""
+    """Send a Feishu template card message."""
     if not domains:
         return True
 
-    total_pages = (len(domains) + FEISHU_PAGE_SIZE - 1) // FEISHU_PAGE_SIZE
-    sent_count = 0
-
-    for index in range(total_pages):
-        start = index * FEISHU_PAGE_SIZE
-        end = start + FEISHU_PAGE_SIZE
-        page_domains = domains[start:end]
-        payload = _build_feishu_page_card(
-            title=title,
-            domains=page_domains,
-            severity=severity,
-            page=index + 1,
-            total_pages=total_pages,
-            total_domains=len(domains),
-        )
-        if await send_webhook(webhook_url, payload):
-            sent_count += 1
-
-    return sent_count == total_pages
+    payload = _build_feishu_template_card(title=title, domains=domains, severity=severity)
+    return await send_webhook(webhook_url, payload)

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     ENV: str = "development"
     DEBUG: bool = True
 
+    # Feishu card template config
+    FEISHU_CARD_TEMPLATE_ID: str = "AAq4KO0lxv06f"
+    FEISHU_CARD_TEMPLATE_VERSION: str = "1.0.2"
+    FEISHU_CARD_TABLE_VARIABLE: str = "table_raw_array_2"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

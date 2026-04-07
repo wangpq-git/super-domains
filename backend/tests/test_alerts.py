@@ -148,7 +148,7 @@ async def test_webhook_payload_serializes_expiry_date(async_session, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_feishu_payload_truncates_long_domain_list(monkeypatch):
+async def test_feishu_payload_uses_template_card(monkeypatch):
     captured = {}
 
     async def fake_send_webhook(url, payload):
@@ -174,12 +174,20 @@ async def test_feishu_payload_truncates_long_domain_list(monkeypatch):
         "warning",
     )
 
-    content = captured["payload"]["card"]["elements"][0]["content"]
+    payload = captured["payload"]
+    card = payload["card"]
+    variables = card["data"]["template_variable"]
+    rows = variables[notification_service.settings.FEISHU_CARD_TABLE_VARIABLE]
+
     assert ok is True
-    assert "服务商" in content
-    assert "剩余天数" in content
-    assert "example24.com" not in content
-    assert "其余 **5** 个域名已省略" in content
+    assert payload["msg_type"] == "interactive"
+    assert card["type"] == "template"
+    assert card["data"]["template_id"] == notification_service.settings.FEISHU_CARD_TEMPLATE_ID
+    assert card["data"]["template_version_name"] == notification_service.settings.FEISHU_CARD_TEMPLATE_VERSION
+    assert len(rows) == 25
+    assert rows[0]["status"] == "剩余1天"
+    assert rows[-1]["domain_name"] == "example24.com"
+    assert variables["title"] == "Alert"
 
 
 def test_should_trigger_weekly_respects_schedule_time():
