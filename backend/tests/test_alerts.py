@@ -186,8 +186,9 @@ async def test_feishu_payload_uses_template_card(monkeypatch):
     assert card["data"]["template_version_name"] == notification_service.settings.FEISHU_CARD_TEMPLATE_VERSION
     assert len(rows) == 25
     assert rows[0]["status"] == "剩余1天"
+    assert rows[0]["buy_site"] == "namecom"
     assert rows[-1]["domain"] == "example24.com"
-    assert set(rows[0]) == {"domain", "expire", "status"}
+    assert set(rows[0]) == {"buy_site", "domain", "expire", "status"}
     assert variables["title"] == "Alert"
 
 
