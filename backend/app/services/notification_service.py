@@ -89,7 +89,7 @@ FEISHU_SEVERITY_MAP = {
     "info": {"icon": "🟢", "label": "提醒", "color": "green"},
 }
 
-FEISHU_MAX_DOMAIN_LINES = 20
+FEISHU_PAGE_SIZE = 10
 
 
 def _trim_text(value: str, limit: int) -> str:
@@ -100,59 +100,127 @@ def _trim_text(value: str, limit: int) -> str:
     return value[: limit - 1] + "…"
 
 
-def _build_feishu_table(domains: list[dict]) -> str:
-    headers = ("服务商", "域名", "到期时间", "剩余天数")
-    rows = []
-    for domain in domains:
-        rows.append((
-            _trim_text(str(domain["platform"] or "-"), 14),
-            _trim_text(str(domain["domain_name"]), 28),
-            domain["expiry_date"].strftime("%Y-%m-%d"),
-            f"{domain['days_left']}天",
-        ))
+def _build_feishu_columns(
+    provider: str,
+    domain_name: str,
+    expiry_date: str,
+    status_text: str,
+    bold: bool = False,
+) -> dict:
+    text_tag = "lark_md" if bold else "plain_text"
+    if bold:
+        provider = f"**{provider}**"
+        domain_name = f"**{domain_name}**"
+        expiry_date = f"**{expiry_date}**"
+        status_text = f"**{status_text}**"
 
-    widths = [len(header) for header in headers]
-    for row in rows:
-        for idx, cell in enumerate(row):
-            widths[idx] = max(widths[idx], len(cell))
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "default",
+        "columns": [
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 25,
+                "elements": [{"tag": text_tag, "content": provider}],
+            },
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 35,
+                "elements": [{"tag": text_tag, "content": domain_name}],
+            },
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 22,
+                "elements": [{"tag": text_tag, "content": expiry_date}],
+            },
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 18,
+                "elements": [{"tag": text_tag, "content": status_text}],
+            },
+        ],
+    }
 
-    def format_row(row: tuple[str, str, str, str]) -> str:
-        return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
 
-    line_sep = "-+-".join("-" * width for width in widths)
-    table_lines = [format_row(headers), line_sep]
-    table_lines.extend(format_row(row) for row in rows)
-    return "```text\n" + "\n".join(table_lines) + "\n```"
-
-
-async def send_feishu(webhook_url: str, title: str, domains: list[dict], severity: str = "warning") -> bool:
-    """发送飞书机器人消息（卡片格式，按告警等级显示颜色）"""
+def _build_feishu_page_card(
+    title: str,
+    domains: list[dict],
+    severity: str,
+    page: int,
+    total_pages: int,
+    total_domains: int,
+) -> dict:
     sev = FEISHU_SEVERITY_MAP.get(severity, FEISHU_SEVERITY_MAP["warning"])
 
-    visible_domains = domains[:FEISHU_MAX_DOMAIN_LINES]
-    lines = [f"**{sev['icon']} {sev['label']}** · 共 **{len(domains)}** 个域名", ""]
-    lines.append(_build_feishu_table(visible_domains))
-    hidden_count = len(domains) - len(visible_domains)
-    if hidden_count > 0:
-        lines.append("")
-        lines.append(f"其余 **{hidden_count}** 个域名已省略，请到系统中查看完整清单。")
-
     elements = [
-        {"tag": "markdown", "content": "\n".join(lines)},
+        {
+            "tag": "markdown",
+            "content": f"**{sev['icon']} {sev['label']}** · 共 **{total_domains}** 个域名",
+        },
         {"tag": "hr"},
-        {"tag": "note", "elements": [
-            {"tag": "plain_text", "content": f"域名管理平台 · {severity.upper()}"}
-        ]},
+        _build_feishu_columns("服务商", "域名", "到期时间", "状态", bold=True),
     ]
 
-    payload = {
+    for domain in domains:
+        provider = _trim_text(str(domain["platform"] or "-"), 18)
+        domain_name = _trim_text(str(domain["domain_name"]), 32)
+        expiry_date = domain["expiry_date"].strftime("%Y-%m-%d")
+        status_text = f"剩余{domain['days_left']}天"
+        elements.append({"tag": "hr"})
+        elements.append(_build_feishu_columns(provider, domain_name, expiry_date, status_text))
+
+    elements.extend([
+        {"tag": "hr"},
+        {
+            "tag": "note",
+            "elements": [
+                {"tag": "plain_text", "content": f"第 {page} / {total_pages} 页 · 每页 10 条"},
+                {"tag": "plain_text", "content": "域名管理平台"},
+            ],
+        },
+    ])
+
+    return {
         "msg_type": "interactive",
         "card": {
             "header": {
-                "title": {"tag": "plain_text", "content": title},
-                "template": sev["color"]
+                "title": {
+                    "tag": "plain_text",
+                    "content": title if total_pages == 1 else f"{title}（第 {page}/{total_pages} 页）",
+                },
+                "template": sev["color"],
             },
-            "elements": elements
-        }
+            "elements": elements,
+        },
     }
-    return await send_webhook(webhook_url, payload)
+
+
+async def send_feishu(webhook_url: str, title: str, domains: list[dict], severity: str = "warning") -> bool:
+    """发送飞书机器人消息（卡片分页样式）"""
+    if not domains:
+        return True
+
+    total_pages = (len(domains) + FEISHU_PAGE_SIZE - 1) // FEISHU_PAGE_SIZE
+    sent_count = 0
+
+    for index in range(total_pages):
+        start = index * FEISHU_PAGE_SIZE
+        end = start + FEISHU_PAGE_SIZE
+        page_domains = domains[start:end]
+        payload = _build_feishu_page_card(
+            title=title,
+            domains=page_domains,
+            severity=severity,
+            page=index + 1,
+            total_pages=total_pages,
+            total_domains=len(domains),
+        )
+        if await send_webhook(webhook_url, payload):
+            sent_count += 1
+
+    return sent_count == total_pages
