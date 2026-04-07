@@ -187,6 +187,7 @@ async def test_feishu_payload_uses_template_card(monkeypatch):
     assert len(rows) == 25
     assert rows[0]["status"] == "剩余1天"
     assert rows[-1]["domain_name"] == "example24.com"
+    assert set(rows[0]) == {"provider", "domain_name", "expiry_date", "status"}
     assert variables["title"] == "Alert"
 
 
