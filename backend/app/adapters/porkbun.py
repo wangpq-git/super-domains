@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import asyncio
 import httpx
 
 from .base import BasePlatformAdapter, DomainInfo, DnsRecordInfo
@@ -61,12 +62,24 @@ class PorkbunAdapter(BasePlatformAdapter):
         await self._request("POST", "/ping", json=payload)
         return True
 
+    async def _get_domain_nameservers(self, domain_name: str) -> List[str]:
+        try:
+            response = await self._request("POST", f"/domain/getNs/{domain_name}", json={})
+        except Exception:
+            return []
+
+        nameservers = response.get("ns", [])
+        if not isinstance(nameservers, list):
+            return []
+        return [str(ns).strip().lower() for ns in nameservers if str(ns).strip()]
+
     async def list_domains(self) -> List[DomainInfo]:
         payload = self._get_base_payload()
         response = await self._request("POST", "/domain/listAll", json=payload)
 
         domains = []
         domain_list = response.get("domains", [])
+        metadata_by_domain: dict[str, dict[str, Any]] = {}
 
         for domain_data in domain_list:
             domain_name = domain_data.get("domain", "")
@@ -96,28 +109,44 @@ class PorkbunAdapter(BasePlatformAdapter):
             if isinstance(locked, str):
                 locked = locked.lower() == "true"
 
-            nameservers = []
-            ns_str = domain_data.get("nameservers", "")
-            if ns_str:
-                nameservers = [ns.strip() for ns in ns_str.split(",") if ns.strip()]
-
             status = "active"
             if domain_data.get("status"):
                 status = domain_data.get("status", "active").lower()
 
-            domains.append(DomainInfo(
+            metadata_by_domain[domain_name] = {
+                "tld": domain_name.split(".")[-1] if "." in domain_name else "",
+                "status": status,
+                "registration_date": registration_date,
+                "expiry_date": expiry_date,
+                "auto_renew": auto_renew,
+                "locked": locked,
+                "raw_data": domain_data,
+            }
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def build_domain(domain_name: str) -> DomainInfo:
+            async with semaphore:
+                nameservers = await self._get_domain_nameservers(domain_name)
+            meta = metadata_by_domain[domain_name]
+            raw_data = dict(meta["raw_data"])
+            raw_data["nameservers"] = nameservers
+            return DomainInfo(
                 name=domain_name,
-                tld=domain_name.split(".")[-1] if "." in domain_name else "",
-                status=status,
-                registration_date=registration_date,
-                expiry_date=expiry_date,
-                auto_renew=auto_renew,
-                locked=locked,
+                tld=meta["tld"],
+                status=meta["status"],
+                registration_date=meta["registration_date"],
+                expiry_date=meta["expiry_date"],
+                auto_renew=meta["auto_renew"],
+                locked=meta["locked"],
                 whois_privacy=False,
                 nameservers=nameservers,
                 external_id=domain_name,
-                raw_data=domain_data
-            ))
+                raw_data=raw_data,
+            )
+
+        if metadata_by_domain:
+            domains = await asyncio.gather(*(build_domain(name) for name in metadata_by_domain))
 
         return domains
 

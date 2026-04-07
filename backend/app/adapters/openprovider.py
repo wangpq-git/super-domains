@@ -191,7 +191,11 @@ class OpenproviderAdapter(BasePlatformAdapter):
                     auto_renew=auto_renew,
                     locked=item.get("is_locked", False),
                     whois_privacy=item.get("whois_privacy", {}).get("is_enabled", False) if isinstance(item.get("whois_privacy"), dict) else False,
-                    nameservers=[ns.get("name", "") for ns in item.get("nameservers", []) if isinstance(ns, dict)] if isinstance(item.get("nameservers"), list) else [],
+                    nameservers=[
+                        ns.get("name", "").lower()
+                        for ns in item.get("name_servers", item.get("nameservers", []))
+                        if isinstance(ns, dict) and ns.get("name")
+                    ] if isinstance(item.get("name_servers", item.get("nameservers", [])), list) else [],
                     external_id=str(item.get("id", domain_name)),
                     raw_data=item
                 ))

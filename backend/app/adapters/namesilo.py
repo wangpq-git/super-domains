@@ -91,6 +91,7 @@ class NamesiloAdapter(BasePlatformAdapter):
                 expiry_date = datetime.max.replace(tzinfo=None)
                 auto_renew = False
                 locked = True
+                nameservers = []
 
                 try:
                     info_root = await self._request("getDomainInfo", {"domain": domain_name})
@@ -110,8 +111,15 @@ class NamesiloAdapter(BasePlatformAdapter):
                         locked_elem = info_reply.find("locked")
                         if locked_elem is not None and locked_elem.text:
                             locked = locked_elem.text.lower() in ("yes", "1", "true")
+
+                        nameservers_elem = info_reply.find("nameservers")
+                        if nameservers_elem is not None:
+                            for node in nameservers_elem.findall("nameserver"):
+                                value = (node.text or "").strip().lower()
+                                if value:
+                                    nameservers.append(value)
                 except Exception:
-                    pass
+                    nameservers = []
 
                 domains.append(DomainInfo(
                     name=domain_name,
@@ -122,9 +130,9 @@ class NamesiloAdapter(BasePlatformAdapter):
                     auto_renew=auto_renew,
                     locked=locked,
                     whois_privacy=False,
-                    nameservers=[],
+                    nameservers=nameservers,
                     external_id=domain_name,
-                    raw_data={"domain": domain_name}
+                    raw_data={"domain": domain_name, "nameservers": nameservers}
                 ))
 
             if len(domain_elements) < limit:

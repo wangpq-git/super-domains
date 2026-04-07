@@ -2,6 +2,7 @@ import pytest
 
 from app.adapters import ADAPTER_REGISTRY, get_adapter
 from app.adapters.cloudflare import CloudflareAdapter
+from app.adapters.dynadot import DynadotAdapter, DEFAULT_DYNADOT_NAMESERVERS
 from app.adapters.namecom import NameComAdapter
 
 
@@ -47,3 +48,34 @@ def test_namecom_init():
 def test_namecom_init_missing_credentials():
     with pytest.raises(ValueError, match="requires 'username' and 'api_token'"):
         NameComAdapter({"username": "onlyuser"})
+
+
+def test_dynadot_parse_domain_nameservers():
+    adapter = DynadotAdapter({"api_key": "test"})
+    domains = adapter._parse_domain_list({
+        "data": {
+            "domain": [
+                {
+                    "Name": "managed.example",
+                    "Expiration": "2030-01-01",
+                    "Status": "active",
+                    "NameServerSettings": {
+                        "Type": "Name Servers",
+                        "NameServers": [
+                            {"ServerName": "ns1.dynadot.com"},
+                            {"ServerName": "ns2.dynadot.com"},
+                        ],
+                    },
+                },
+                {
+                    "Name": "parking.example",
+                    "Expiration": "2030-01-01",
+                    "Status": "active",
+                    "NameServerSettings": {"Type": "Dynadot Parking"},
+                },
+            ]
+        }
+    })
+
+    assert domains[0].nameservers == ["ns1.dynadot.com", "ns2.dynadot.com"]
+    assert domains[1].nameservers == DEFAULT_DYNADOT_NAMESERVERS

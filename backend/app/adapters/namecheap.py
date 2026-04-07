@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import asyncio
 import httpx
 from lxml import etree
 
@@ -71,10 +72,29 @@ class NamecheapAdapter(BasePlatformAdapter):
         parts = domain_name.rsplit(".", 1)
         return parts[0], parts[1]
 
+    async def _get_domain_nameservers(self, domain_name: str) -> List[str]:
+        try:
+            root = await self._request({
+                "Command": "namecheap.domains.getInfo",
+                "DomainName": domain_name,
+            })
+        except Exception:
+            return []
+
+        nodes = root.findall(".//DnsDetails/Nameserver")
+        nameservers = []
+        for node in nodes:
+            value = (node.text or "").strip().lower()
+            if value:
+                nameservers.append(value)
+        return nameservers
+
     async def list_domains(self) -> List[DomainInfo]:
         domains = []
         page = 1
         page_size = 100
+        domain_names: list[str] = []
+        metadata_by_domain: dict[str, dict[str, Any]] = {}
 
         while True:
             params = {
@@ -113,25 +133,22 @@ class NamecheapAdapter(BasePlatformAdapter):
                 if is_locked:
                     status = "locked"
 
-                domains.append(DomainInfo(
-                    name=domain_name,
-                    tld=domain_name.split(".")[-1] if "." in domain_name else "",
-                    status=status,
-                    registration_date=None,
-                    expiry_date=expiry_date,
-                    auto_renew=auto_renew,
-                    locked=is_locked,
-                    whois_privacy=whois_guard,
-                    nameservers=[],
-                    external_id=domain_name,
-                    raw_data={
+                domain_names.append(domain_name)
+                metadata_by_domain[domain_name] = {
+                    "tld": domain_name.split(".")[-1] if "." in domain_name else "",
+                    "status": status,
+                    "expiry_date": expiry_date,
+                    "auto_renew": auto_renew,
+                    "locked": is_locked,
+                    "whois_privacy": whois_guard,
+                    "raw_data": {
                         "Name": domain_name,
                         "Expires": expires,
                         "AutoRenew": auto_renew,
                         "IsLocked": is_locked,
-                        "WhoisGuard": whois_guard
-                    }
-                ))
+                        "WhoisGuard": whois_guard,
+                    },
+                }
 
             paging = root.find(".//Paging")
             total_items = 0
@@ -146,6 +163,31 @@ class NamecheapAdapter(BasePlatformAdapter):
             if len(domain_elements) < page_size or (total_items > 0 and page * page_size >= total_items):
                 break
             page += 1
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def build_domain(domain_name: str) -> DomainInfo:
+            async with semaphore:
+                nameservers = await self._get_domain_nameservers(domain_name)
+            meta = metadata_by_domain[domain_name]
+            raw_data = dict(meta["raw_data"])
+            raw_data["Nameservers"] = nameservers
+            return DomainInfo(
+                name=domain_name,
+                tld=meta["tld"],
+                status=meta["status"],
+                registration_date=None,
+                expiry_date=meta["expiry_date"],
+                auto_renew=meta["auto_renew"],
+                locked=meta["locked"],
+                whois_privacy=meta["whois_privacy"],
+                nameservers=nameservers,
+                external_id=domain_name,
+                raw_data=raw_data,
+            )
+
+        if domain_names:
+            domains = await asyncio.gather(*(build_domain(name) for name in domain_names))
 
         return domains
 

@@ -9,8 +9,13 @@ from app.models.platform_account import PlatformAccount
 
 MANAGED_NS_PATTERNS: dict[str, tuple[str, ...]] = {
     "cloudflare": ("cloudflare.com",),
+    "dynadot": ("dynadot.com",),
     "godaddy": ("domaincontrol.com",),
+    "namecheap": ("registrar-servers.com",),
     "namecom": ("name.com",),
+    "namesilo": ("dnsowl.com",),
+    "openprovider": ("openprovider.nl",),
+    "porkbun": ("ns.porkbun.com",),
 }
 
 

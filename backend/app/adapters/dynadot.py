@@ -6,6 +6,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_DYNADOT_NAMESERVERS = ["ns1.dynadot.com", "ns2.dynadot.com"]
+
 
 @register_adapter('dynadot')
 class DynadotAdapter(BasePlatformAdapter):
@@ -115,15 +117,18 @@ class DynadotAdapter(BasePlatformAdapter):
                 ns_settings = item.get("NameServerSettings", {})
                 nameservers = []
                 if isinstance(ns_settings, dict):
-                    ns_list = ns_settings.get("Nameservers", ns_settings.get("nameservers", []))
+                    ns_list = ns_settings.get("NameServers", ns_settings.get("Nameservers", ns_settings.get("nameservers", [])))
                     if isinstance(ns_list, list):
                         for ns in ns_list:
                             if isinstance(ns, dict):
-                                ns_name = ns.get("ServName", ns.get("name", ns.get("value", "")))
+                                ns_name = ns.get("ServerName", ns.get("ServName", ns.get("name", ns.get("value", ""))))
                                 if ns_name:
                                     nameservers.append(ns_name)
                             elif isinstance(ns, str):
                                 nameservers.append(ns)
+                    ns_type = str(ns_settings.get("Type", "")).lower()
+                    if not nameservers and ns_type.startswith("dynadot"):
+                        nameservers = DEFAULT_DYNADOT_NAMESERVERS.copy()
 
                 domains.append(DomainInfo(
                     name=name,
