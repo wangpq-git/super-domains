@@ -115,7 +115,6 @@ def _trim_text(value: str, limit: int) -> str:
 def _build_feishu_template_rows(domains: list[dict]) -> list[dict]:
     rows = []
     for domain in domains:
-        provider = _trim_text(str(domain.get("platform") or "-"), 18)
         domain_name = _trim_text(str(domain.get("domain_name") or "-"), 64)
         expiry_date = domain["expiry_date"].strftime("%Y-%m-%d")
         days_left = int(domain.get("days_left") or 0)
@@ -123,9 +122,8 @@ def _build_feishu_template_rows(domains: list[dict]) -> list[dict]:
 
         rows.append(
             {
-                "provider": provider,
-                "domain_name": domain_name,
-                "expiry_date": expiry_date,
+                "domain": domain_name,
+                "expire": expiry_date,
                 "status": status_text,
             }
         )
