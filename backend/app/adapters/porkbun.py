@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import asyncio
 import httpx
+import dns.resolver
 
 from .base import BasePlatformAdapter, DomainInfo, DnsRecordInfo
 from . import register_adapter
@@ -66,12 +67,40 @@ class PorkbunAdapter(BasePlatformAdapter):
         try:
             response = await self._request("POST", f"/domain/getNs/{domain_name}", json={})
         except Exception:
-            return []
+            return await self._resolve_public_nameservers(domain_name)
 
         nameservers = response.get("ns", [])
         if not isinstance(nameservers, list):
+            return await self._resolve_public_nameservers(domain_name)
+
+        normalized = [str(ns).strip().lower() for ns in nameservers if str(ns).strip()]
+        if normalized:
+            return normalized
+        return await self._resolve_public_nameservers(domain_name)
+
+    async def _resolve_public_nameservers(self, domain_name: str) -> List[str]:
+        return await asyncio.to_thread(self._resolve_public_nameservers_sync, domain_name)
+
+    def _resolve_public_nameservers_sync(self, domain_name: str) -> List[str]:
+        resolver = dns.resolver.Resolver(configure=True)
+        resolver.timeout = 5.0
+        resolver.lifetime = 5.0
+
+        try:
+            answers = resolver.resolve(domain_name, "NS", search=False, raise_on_no_answer=False)
+        except Exception:
             return []
-        return [str(ns).strip().lower() for ns in nameservers if str(ns).strip()]
+
+        if not answers.rrset:
+            return []
+
+        nameservers = []
+        for answer in answers:
+            target = getattr(answer, "target", None)
+            value = str(target or answer).strip().rstrip(".").lower()
+            if value:
+                nameservers.append(value)
+        return nameservers
 
     async def list_domains(self) -> List[DomainInfo]:
         payload = self._get_base_payload()

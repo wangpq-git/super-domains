@@ -29,3 +29,21 @@ def test_is_dns_managed_by_account_accepts_namesilo_dnsowl():
     domain.account = account
 
     assert is_dns_managed_by_account(domain) is True
+
+
+def test_is_dns_managed_by_account_accepts_porkbun_anycast_nameservers():
+    account = PlatformAccount(platform="porkbun", account_name="pb", credentials="{}")
+    domain = Domain(
+        domain_name="example.com",
+        status="active",
+        expiry_date=datetime.utcnow() + timedelta(days=30),
+        nameservers=[
+            "curitiba.ns.porkbun.com",
+            "fortaleza.ns.porkbun.com",
+            "maceio.ns.porkbun.com",
+            "salvador.ns.porkbun.com",
+        ],
+    )
+    domain.account = account
+
+    assert is_dns_managed_by_account(domain) is True

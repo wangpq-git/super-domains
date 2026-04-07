@@ -15,7 +15,7 @@ MANAGED_NS_PATTERNS: dict[str, tuple[str, ...]] = {
     "namecom": ("name.com",),
     "namesilo": ("dnsowl.com",),
     "openprovider": ("openprovider.nl",),
-    "porkbun": ("ns.porkbun.com",),
+    "porkbun": ("porkbun.com",),
 }
 
 
