@@ -23,6 +23,8 @@ async def send_email(recipients: list[str], subject: str, body: str) -> bool:
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
+    sent = 0
+
     for recipient in recipients:
         try:
             msg = MIMEMultipart("alternative")
@@ -41,10 +43,11 @@ async def send_email(recipients: list[str], subject: str, body: str) -> bool:
                 start_tls=getattr(settings, "SMTP_START_TLS", True),
             )
             logger.info("Email sent to %s: %s", recipient, subject)
+            sent += 1
         except Exception as e:
             logger.error("Failed to send email to %s: %s", recipient, e)
 
-    return True
+    return sent > 0
 
 
 async def send_webhook(url: str, payload: dict) -> bool:

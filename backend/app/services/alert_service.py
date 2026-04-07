@@ -156,26 +156,26 @@ async def _process_single_rule(db: AsyncSession, rule, now: datetime) -> int:
         email_recipients = [r for r in recipients if "@" in r]
         if email_recipients:
             html_body = markdown_body.replace("\n", "<br>")
-            await send_email(email_recipients, title, html_body)
-            total_notifications += 1
+            if await send_email(email_recipients, title, html_body):
+                total_notifications += 1
 
     if "dingtalk" in channels and recipients:
         for url in recipients:
             if url.startswith("http"):
-                await send_dingtalk(url, title, markdown_body)
-                total_notifications += 1
+                if await send_dingtalk(url, title, markdown_body):
+                    total_notifications += 1
 
     if "wechat" in channels and recipients:
         for url in recipients:
             if url.startswith("http"):
-                await send_wechat(url, markdown_body)
-                total_notifications += 1
+                if await send_wechat(url, markdown_body):
+                    total_notifications += 1
 
     if "feishu" in channels and recipients:
         for url in recipients:
             if url.startswith("http"):
-                await send_feishu(url, title, domains_to_alert, severity=rule.severity or "warning")
-                total_notifications += 1
+                if await send_feishu(url, title, domains_to_alert, severity=rule.severity or "warning"):
+                    total_notifications += 1
 
     if "webhook" in channels and recipients:
         for url in recipients:
@@ -187,8 +187,8 @@ async def _process_single_rule(db: AsyncSession, rule, now: datetime) -> int:
                     "checked_at": now.isoformat(),
                 }
                 from app.services.notification_service import send_webhook
-                await send_webhook(url, payload)
-                total_notifications += 1
+                if await send_webhook(url, payload):
+                    total_notifications += 1
 
     return total_notifications
 
@@ -204,7 +204,12 @@ async def check_expiring_domains(db: AsyncSession) -> dict:
     total_notifications = 0
 
     for rule in enabled_rules:
-        total_notifications += await _process_single_rule(db, rule, now)
+        rule_id = rule.id
+        rule_name = rule.name
+        try:
+            total_notifications += await _process_single_rule(db, rule, now)
+        except Exception:
+            logger.exception("Manual alert check failed: rule_id=%s name=%s", rule_id, rule_name)
 
     logger.info("Alert check completed: %d notifications sent", total_notifications)
 
@@ -252,9 +257,15 @@ async def run_scheduled_alerts(db: AsyncSession) -> dict:
     total_notifications = 0
 
     for rule in rules:
-        if not rule.is_enabled or not _should_trigger(rule, now):
+        if rule.rule_type != "domain_expiry" or not rule.is_enabled or not _should_trigger(rule, now):
             continue
-        result = await _process_single_rule(db, rule, now)
+        rule_id = rule.id
+        rule_name = rule.name
+        try:
+            result = await _process_single_rule(db, rule, now)
+        except Exception:
+            logger.exception("Scheduled alert rule failed: rule_id=%s name=%s", rule_id, rule_name)
+            continue
         if result > 0:
             triggered += 1
             total_notifications += result
