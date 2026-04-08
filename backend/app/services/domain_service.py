@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import select, func
@@ -132,7 +132,7 @@ async def list_domains(
 
 
 async def get_domain_stats(db: AsyncSession) -> dict:
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     thirty_days_later = now + __import__("datetime").timedelta(days=30)
     seven_days_later = now + __import__("datetime").timedelta(days=7)
 

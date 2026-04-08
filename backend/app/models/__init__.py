@@ -4,6 +4,8 @@ from app.models.domain import Domain
 from app.models.dns_record import DnsRecord
 from app.models.alert_rule import AlertRule
 from app.models.audit_log import AuditLog
+from app.models.change_request import ChangeRequest
+from app.models.change_request_event import ChangeRequestEvent
 
 __all__ = [
     "User",
@@ -12,4 +14,6 @@ __all__ = [
     "DnsRecord",
     "AlertRule",
     "AuditLog",
+    "ChangeRequest",
+    "ChangeRequestEvent",
 ]

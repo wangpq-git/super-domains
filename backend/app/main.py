@@ -29,14 +29,17 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时自动创建数据库表
-    from app.db.session import engine
-    from app.db.base import Base
     import app.models  # noqa: F401 - ensure all models are registered
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created/verified")
+    if settings.AUTO_CREATE_TABLES:
+        from app.db.session import engine
+        from app.db.base import Base
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created/verified by AUTO_CREATE_TABLES")
+    else:
+        logger.info("AUTO_CREATE_TABLES disabled; expecting schema to be managed by Alembic")
     logger.info("Domain Manage API started")
     yield
     # 关闭时执行

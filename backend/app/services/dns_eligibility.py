@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import String, and_, cast, false, or_
 
@@ -20,7 +20,7 @@ MANAGED_NS_PATTERNS: dict[str, tuple[str, ...]] = {
 
 
 def is_non_expired_domain(domain: Domain, now: datetime | None = None) -> bool:
-    current = now or datetime.utcnow()
+    current = now or datetime.now(UTC).replace(tzinfo=None)
     return bool(domain.expiry_date and domain.expiry_date > current and domain.status != "removed")
 
 
@@ -42,7 +42,7 @@ def is_dns_managed_by_account(domain: Domain, platform: str | None = None, now: 
 
 
 def non_expired_domain_clause(now: datetime | None = None):
-    current = now or datetime.utcnow()
+    current = now or datetime.now(UTC).replace(tzinfo=None)
     return and_(
         Domain.status != "removed",
         Domain.expiry_date.is_not(None),

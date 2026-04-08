@@ -36,6 +36,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/DnsManage.vue')
       },
       {
+        path: 'change-requests',
+        name: 'ChangeRequests',
+        component: () => import('@/views/ChangeRequests.vue')
+      },
+      {
         path: 'alerts',
         name: 'Alerts',
         component: () => import('@/views/Alerts.vue')

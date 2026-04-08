@@ -1,15 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_user, require_admin
+from app.api.deps import get_db, get_current_user
 from app.models.user import User
-from app.models.domain import Domain
+from app.schemas.change_request import ChangeRequestResponse
 from app.schemas.dns_record import (
     DnsRecordCreate,
     DnsRecordUpdate,
     DnsRecordResponse,
 )
-from app.services import dns_service
+from app.services import change_request_service, dns_service
 
 router = APIRouter()
 
@@ -41,43 +41,41 @@ async def sync_dns_records(domain_id: int, db: AsyncSession = Depends(get_db)):
     return result
 
 
-@router.post("/{domain_id}/records", response_model=DnsRecordResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{domain_id}/records", response_model=ChangeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_dns_record(
     domain_id: int,
     data: DnsRecordCreate,
-    admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        record = await dns_service.create_dns_record(db, domain_id, data)
+        record = await change_request_service.create_dns_create_request(db, current_user, domain_id, data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return record
 
 
-@router.put("/records/{record_id}", response_model=DnsRecordResponse)
+@router.put("/records/{record_id}", response_model=ChangeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def update_dns_record(
     record_id: int,
     data: DnsRecordUpdate,
-    admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        record = await dns_service.update_dns_record(db, record_id, data)
+        record = await change_request_service.create_dns_update_request(db, current_user, record_id, data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DNS record not found")
     return record
 
 
-@router.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/records/{record_id}", response_model=ChangeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def delete_dns_record(
     record_id: int,
-    admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        await dns_service.delete_dns_record(db, record_id)
+        return await change_request_service.create_dns_delete_request(db, current_user, record_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,7 +21,7 @@ async def test_sync_dns_records_skips_unmanaged_domain(client, async_session):
         account_id=account.id,
         domain_name="external.example",
         status="active",
-        expiry_date=datetime.utcnow() + timedelta(days=7),
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=7),
         nameservers=["ns1.example.com", "ns2.example.com"],
     )
     async_session.add(domain)

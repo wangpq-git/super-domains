@@ -1,23 +1,15 @@
 import pytest
-import asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from app.db.base import Base
+from app.api.deps import get_db as api_get_db
 from app.db.session import get_db
 from app.main import app
 from app.core.security import create_access_token, hash_password
 from app.models.user import User
 
 TEST_DB_URL = "sqlite+aiosqlite:///./test.db"
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
 
 @pytest.fixture
 async def async_session():
@@ -38,6 +30,7 @@ async def client(async_session):
         yield async_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[api_get_db] = override_get_db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

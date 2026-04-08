@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,8 +24,7 @@ async def test_domain_stats(client):
     assert "total_domains" in data
     assert "by_platform" in data
     assert "by_status" in data
-    assert "expiring_30d" in data
-    assert "expiring_7d" in data
+    assert "by_expiry" in data
     assert "expired" in data
     assert data["total_domains"] == 0
 
@@ -41,7 +40,7 @@ async def test_list_domains_for_dns_manage_filters_manageable_non_expired(client
     async_session.add(account)
     await async_session.flush()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     async_session.add_all([
         Domain(
             account_id=account.id,

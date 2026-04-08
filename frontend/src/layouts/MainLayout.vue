@@ -32,6 +32,10 @@
           <el-icon><Setting /></el-icon>
           <template #title>DNS管理</template>
         </el-menu-item>
+        <el-menu-item index="/change-requests">
+          <el-icon><Tickets /></el-icon>
+          <template #title>审批中心</template>
+        </el-menu-item>
         <el-menu-item index="/alerts">
           <el-icon><Bell /></el-icon>
           <template #title>告警规则</template>
@@ -125,6 +129,7 @@ const titleMap: Record<string, string> = {
   '/domains': '域名管理',
   '/accounts': '账户管理',
   '/dns': 'DNS管理',
+  '/change-requests': '审批中心',
   '/alerts': '告警规则',
   '/users': '用户管理',
 }

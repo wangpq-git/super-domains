@@ -5,11 +5,17 @@
 import secrets
 from typing import Optional
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """应用配置类"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
 
     # 应用信息
     APP_NAME: str = "Domain Manage"
@@ -40,17 +46,18 @@ class Settings(BaseSettings):
     # 可选的环境配置
     ENV: str = "development"
     DEBUG: bool = True
+    AUTO_CREATE_TABLES: bool = False
 
     # Feishu card template config
     FEISHU_CARD_TEMPLATE_ID: str = "AAq4KO0lxv06f"
     FEISHU_CARD_TEMPLATE_VERSION: str = "1.0.2"
     FEISHU_CARD_TABLE_VARIABLE: str = "table_raw_array_2"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-
+    FEISHU_APPROVAL_WEBHOOK_URL: str = ""
+    FEISHU_APPROVAL_BASE_URL: str = ""
+    FEISHU_APPROVAL_CALLBACK_TOKEN: str = ""
+    FEISHU_APPROVAL_ENCRYPT_KEY: str = ""
+    FEISHU_APPROVAL_SIGNATURE_TOLERANCE_SECONDS: int = 300
+    FEISHU_APPROVAL_ADMIN_MAP: str = "{}"
 
 # 全局配置实例
 settings = Settings()
