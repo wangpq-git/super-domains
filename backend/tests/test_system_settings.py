@@ -114,3 +114,85 @@ async def test_feishu_callback_uses_database_config(client, async_session, auth_
     payload = callback_resp.json()
     assert payload["status"] == "succeeded"
     assert payload["approver_user_id"] is not None
+
+
+import sys
+import types
+
+from app.services import auth_service, ldap_service, notification_service
+
+
+@pytest.mark.asyncio
+async def test_ldap_auth_toggle_uses_database_setting(client, async_session, sample_user, auth_headers, monkeypatch):
+    resp = await client.put(
+        "/api/v1/system-settings",
+        headers=auth_headers,
+        json={
+            "items": [
+                {"key": "LDAP_ENABLED", "value": False},
+            ]
+        },
+    )
+    assert resp.status_code == 200
+
+    async def fake_ldap_auth(db, username, password):
+        raise AssertionError("LDAP should not be called when LDAP_ENABLED is false")
+
+    monkeypatch.setattr(ldap_service, "authenticate", fake_ldap_auth)
+
+    user = await auth_service.authenticate_user(async_session, sample_user.username, "TestPass123")
+    assert user is not None
+    assert user.username == sample_user.username
+
+
+@pytest.mark.asyncio
+async def test_send_email_uses_database_backed_smtp_settings(client, async_session, auth_headers, monkeypatch):
+    resp = await client.put(
+        "/api/v1/system-settings",
+        headers=auth_headers,
+        json={
+            "items": [
+                {"key": "SMTP_HOST", "value": "smtp.example.com"},
+                {"key": "SMTP_PORT", "value": 2525},
+                {"key": "SMTP_USER", "value": "mailer@example.com"},
+                {"key": "SMTP_PASSWORD", "value": "smtp-secret"},
+                {"key": "SMTP_FROM", "value": "noreply@example.com"},
+                {"key": "SMTP_USE_TLS", "value": False},
+                {"key": "SMTP_START_TLS", "value": True},
+            ]
+        },
+    )
+    assert resp.status_code == 200
+
+    calls = []
+
+    async def fake_send(message, *, hostname, port, username, password, use_tls, start_tls):
+        calls.append(
+            {
+                "message": message,
+                "hostname": hostname,
+                "port": port,
+                "username": username,
+                "password": password,
+                "use_tls": use_tls,
+                "start_tls": start_tls,
+            }
+        )
+
+    monkeypatch.setitem(sys.modules, "aiosmtplib", types.SimpleNamespace(send=fake_send))
+
+    ok = await notification_service.send_email(
+        ["user@example.com"],
+        "hello",
+        "<b>world</b>",
+        db=async_session,
+    )
+
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0]["hostname"] == "smtp.example.com"
+    assert calls[0]["port"] == 2525
+    assert calls[0]["username"] == "mailer@example.com"
+    assert calls[0]["password"] == "smtp-secret"
+    assert calls[0]["use_tls"] is False
+    assert calls[0]["start_tls"] is True
