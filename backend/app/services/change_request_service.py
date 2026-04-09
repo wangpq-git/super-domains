@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.config import settings
 from app.core.encryption import decrypt_credentials
 from app.adapters import get_adapter
 from app.adapters.base import DnsRecordInfo
@@ -18,7 +17,7 @@ from app.models.dns_record import DnsRecord
 from app.models.domain import Domain
 from app.models.user import User
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
-from app.services import dns_service
+from app.services import dns_service, system_setting_service
 from app.services.notification_service import send_webhook
 
 logger = logging.getLogger(__name__)
@@ -85,8 +84,9 @@ def build_feishu_change_request_card(
     *,
     include_actions: bool = True,
     result_note: str | None = None,
+    base_url: str = "",
 ) -> dict[str, Any]:
-    base_url = getattr(settings, "FEISHU_APPROVAL_BASE_URL", "").rstrip("/")
+    base_url = base_url.rstrip("/")
     request_detail = {
         "request_no": change_request.request_no,
         "operation_type": change_request.operation_type,
@@ -180,22 +180,24 @@ def build_change_request_result_note(change_request: ChangeRequest) -> str:
     return f"当前状态: {change_request.status}"
 
 
-async def _notify_change_request(change_request: ChangeRequest) -> None:
-    webhook_url = getattr(settings, "FEISHU_APPROVAL_WEBHOOK_URL", None)
+async def _notify_change_request(db: AsyncSession, change_request: ChangeRequest) -> None:
+    webhook_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_WEBHOOK_URL")
     if not webhook_url:
         return
+    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
 
     payload = {
         "msg_type": "interactive",
-        "card": build_feishu_change_request_card(change_request),
+        "card": build_feishu_change_request_card(change_request, base_url=base_url),
     }
     await send_webhook(webhook_url, payload)
 
 
-async def _notify_change_request_result(change_request: ChangeRequest, result_note: str) -> None:
-    webhook_url = getattr(settings, "FEISHU_APPROVAL_WEBHOOK_URL", None)
+async def _notify_change_request_result(db: AsyncSession, change_request: ChangeRequest, result_note: str) -> None:
+    webhook_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_WEBHOOK_URL")
     if not webhook_url:
         return
+    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
 
     payload = {
         "msg_type": "interactive",
@@ -203,9 +205,148 @@ async def _notify_change_request_result(change_request: ChangeRequest, result_no
             change_request,
             include_actions=False,
             result_note=result_note,
+            base_url=base_url,
         ),
     }
     await send_webhook(webhook_url, payload)
+
+
+async def should_require_approval(db: AsyncSession, user: User) -> bool:
+    approval_enabled = await system_setting_service.get_bool(db, "APPROVAL_ENABLED")
+    if not approval_enabled:
+        return False
+    allow_admin_bypass = await system_setting_service.get_bool(db, "APPROVAL_ALLOW_ADMIN_BYPASS")
+    if allow_admin_bypass and user.role == "admin":
+        return False
+    return True
+
+
+async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int, data: DnsRecordCreate) -> ChangeRequest:
+    record = await dns_service.create_dns_record(db, domain_id, data)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return ChangeRequest(
+        id=0,
+        request_no=uuid4().hex[:12],
+        source="api",
+        requester_user_id=user.id,
+        requester_name=user.display_name or user.username,
+        operation_type=OP_DNS_CREATE,
+        target_type="dns_record",
+        target_id=record.id,
+        domain_id=domain_id,
+        payload={"domain_id": domain_id, "data": data.model_dump()},
+        before_snapshot={},
+        after_snapshot=data.model_dump(),
+        risk_level="low",
+        status=STATUS_SUCCEEDED,
+        approval_channel="direct",
+        approver_user_id=user.id,
+        approver_name=user.display_name or user.username,
+        approved_at=now,
+        executed_at=now,
+        execution_result={"record_id": record.id, "mode": "direct"},
+        expires_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int, data: DnsRecordUpdate) -> ChangeRequest:
+    record = await dns_service.update_dns_record(db, record_id, data)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return ChangeRequest(
+        id=0,
+        request_no=uuid4().hex[:12],
+        source="api",
+        requester_user_id=user.id,
+        requester_name=user.display_name or user.username,
+        operation_type=OP_DNS_UPDATE,
+        target_type="dns_record",
+        target_id=record.id,
+        domain_id=record.domain_id,
+        payload={"record_id": record_id, "data": data.model_dump(exclude_unset=True)},
+        before_snapshot={},
+        after_snapshot=data.model_dump(exclude_unset=True),
+        risk_level="low",
+        status=STATUS_SUCCEEDED,
+        approval_channel="direct",
+        approver_user_id=user.id,
+        approver_name=user.display_name or user.username,
+        approved_at=now,
+        executed_at=now,
+        execution_result={"record_id": record.id, "mode": "direct"},
+        expires_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def execute_dns_delete_direct(db: AsyncSession, user: User, record_id: int) -> ChangeRequest:
+    await dns_service.delete_dns_record(db, record_id)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return ChangeRequest(
+        id=0,
+        request_no=uuid4().hex[:12],
+        source="api",
+        requester_user_id=user.id,
+        requester_name=user.display_name or user.username,
+        operation_type=OP_DNS_DELETE,
+        target_type="dns_record",
+        target_id=record_id,
+        domain_id=None,
+        payload={"record_id": record_id},
+        before_snapshot={},
+        after_snapshot={},
+        risk_level="low",
+        status=STATUS_SUCCEEDED,
+        approval_channel="direct",
+        approver_user_id=user.id,
+        approver_name=user.display_name or user.username,
+        approved_at=now,
+        executed_at=now,
+        execution_result={"record_id": record_id, "mode": "direct"},
+        expires_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _build_direct_result(
+    *,
+    user: User,
+    operation_type: str,
+    target_type: str,
+    target_id: int | None,
+    domain_id: int | None,
+    payload: dict[str, Any],
+    execution_result: dict[str, Any],
+) -> ChangeRequest:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return ChangeRequest(
+        id=0,
+        request_no=uuid4().hex[:12],
+        source="api",
+        requester_user_id=user.id,
+        requester_name=user.display_name or user.username,
+        operation_type=operation_type,
+        target_type=target_type,
+        target_id=target_id,
+        domain_id=domain_id,
+        payload=payload,
+        before_snapshot={},
+        after_snapshot=payload,
+        risk_level="low",
+        status=STATUS_SUCCEEDED,
+        approval_channel="direct",
+        approver_user_id=user.id,
+        approver_name=user.display_name or user.username,
+        approved_at=now,
+        executed_at=now,
+        execution_result=execution_result,
+        expires_at=now,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 async def _create_request(
@@ -252,7 +393,7 @@ async def _create_request(
     await db.commit()
     await db.refresh(change_request)
     try:
-        await _notify_change_request(change_request)
+        await _notify_change_request(db, change_request)
     except Exception:
         logger.exception("Failed to send change request notification for %s", change_request.request_no)
     return change_request
@@ -382,6 +523,34 @@ async def create_batch_nameserver_request(db: AsyncSession, user: User, body: di
     )
 
 
+async def execute_batch_dns_direct(db: AsyncSession, user: User, body: dict[str, Any]) -> ChangeRequest:
+    result = await _execute_batch_dns(db, body)
+    domain_ids = body.get("domain_ids") or []
+    return _build_direct_result(
+        user=user,
+        operation_type=OP_BATCH_DNS_UPDATE,
+        target_type="domain",
+        target_id=None,
+        domain_id=domain_ids[0] if domain_ids else None,
+        payload=body,
+        execution_result=result,
+    )
+
+
+async def execute_batch_nameserver_direct(db: AsyncSession, user: User, body: dict[str, Any]) -> ChangeRequest:
+    result = await _execute_batch_nameservers(db, body)
+    domain_ids = body.get("domain_ids") or []
+    return _build_direct_result(
+        user=user,
+        operation_type=OP_BATCH_NAMESERVER_UPDATE,
+        target_type="domain",
+        target_id=None,
+        domain_id=domain_ids[0] if domain_ids else None,
+        payload=body,
+        execution_result=result,
+    )
+
+
 async def list_change_requests(
     db: AsyncSession,
     user: User,
@@ -450,16 +619,9 @@ async def get_admin_user_by_id(db: AsyncSession, user_id: int) -> User | None:
     return user
 
 
-def _parse_admin_map() -> dict[str, Any]:
-    raw = settings.FEISHU_APPROVAL_ADMIN_MAP
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Invalid FEISHU_APPROVAL_ADMIN_MAP JSON")
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+async def _parse_admin_map(db: AsyncSession) -> dict[str, Any]:
+    raw = await system_setting_service.get_json_dict(db, "FEISHU_APPROVAL_ADMIN_MAP")
+    return raw if isinstance(raw, dict) else {}
 
 
 async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> User | None:
@@ -475,7 +637,7 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
         "email": identifiers.get("email"),
     }
 
-    admin_map = _parse_admin_map()
+    admin_map = await _parse_admin_map(db)
     for key in ("open_id", "union_id", "user_id", "employee_id", "username", "email"):
         value = identifiers.get(key)
         if not value:
@@ -521,6 +683,7 @@ async def reject_change_request(db: AsyncSession, change_request: ChangeRequest,
     await db.refresh(change_request)
     try:
         await _notify_change_request_result(
+            db,
             change_request,
             build_change_request_result_note(change_request),
         )
@@ -644,6 +807,7 @@ async def approve_change_request(db: AsyncSession, change_request: ChangeRequest
         await db.commit()
         try:
             await _notify_change_request_result(
+                db,
                 change_request,
                 build_change_request_result_note(change_request),
             )
@@ -667,6 +831,7 @@ async def approve_change_request(db: AsyncSession, change_request: ChangeRequest
         await db.commit()
         try:
             await _notify_change_request_result(
+                db,
                 change_request,
                 build_change_request_result_note(change_request),
             )

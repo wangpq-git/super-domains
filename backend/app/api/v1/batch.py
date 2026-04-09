@@ -43,7 +43,10 @@ async def batch_update_dns(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await change_request_service.create_batch_dns_request(db, current_user, body.model_dump())
+    payload = body.model_dump()
+    if await change_request_service.should_require_approval(db, current_user):
+        return await change_request_service.create_batch_dns_request(db, current_user, payload)
+    return await change_request_service.execute_batch_dns_direct(db, current_user, payload)
 
 
 @router.post("/sync")
@@ -74,4 +77,7 @@ async def batch_update_nameservers(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await change_request_service.create_batch_nameserver_request(db, current_user, body.model_dump())
+    payload = body.model_dump()
+    if await change_request_service.should_require_approval(db, current_user):
+        return await change_request_service.create_batch_nameserver_request(db, current_user, payload)
+    return await change_request_service.execute_batch_nameserver_direct(db, current_user, payload)

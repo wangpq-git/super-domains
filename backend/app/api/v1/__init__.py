@@ -11,6 +11,7 @@ from app.api.v1.change_requests import router as change_requests_router
 from app.api.v1.export import router as export_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.users import router as users_router
+from app.api.v1.system_settings import router as system_settings_router
 from app.api.v1.webhooks import router as webhooks_router
 
 api_router = APIRouter()
@@ -25,6 +26,7 @@ api_router.include_router(change_requests_router, prefix="/change-requests", tag
 api_router.include_router(export_router, prefix="/export", tags=["export"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
+api_router.include_router(system_settings_router, prefix="/system-settings", tags=["system-settings"])
 api_router.include_router(webhooks_router, prefix="/webhooks", tags=["webhooks"])
 
 

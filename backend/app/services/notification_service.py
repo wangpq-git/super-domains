@@ -3,8 +3,10 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services import system_setting_service
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +17,28 @@ FEISHU_SEVERITY_MAP = {
 }
 
 
-async def send_email(recipients: list[str], subject: str, body: str) -> bool:
-    smtp_host = getattr(settings, "SMTP_HOST", None)
-    smtp_port = getattr(settings, "SMTP_PORT", 587)
-    smtp_user = getattr(settings, "SMTP_USER", None)
-    smtp_password = getattr(settings, "SMTP_PASSWORD", None)
-    smtp_from = getattr(settings, "SMTP_FROM", smtp_user)
+async def send_email(
+    recipients: list[str],
+    subject: str,
+    body: str,
+    db: AsyncSession | None = None,
+) -> bool:
+    if db is not None:
+        smtp_host = await system_setting_service.get_string(db, "SMTP_HOST")
+        smtp_port = await system_setting_service.get_int(db, "SMTP_PORT")
+        smtp_user = await system_setting_service.get_string(db, "SMTP_USER")
+        smtp_password = await system_setting_service.get_string(db, "SMTP_PASSWORD")
+        smtp_from = await system_setting_service.get_string(db, "SMTP_FROM")
+        smtp_use_tls = await system_setting_service.get_bool(db, "SMTP_USE_TLS")
+        smtp_start_tls = await system_setting_service.get_bool(db, "SMTP_START_TLS")
+    else:
+        smtp_host = getattr(settings, "SMTP_HOST", None)
+        smtp_port = getattr(settings, "SMTP_PORT", 587)
+        smtp_user = getattr(settings, "SMTP_USER", None)
+        smtp_password = getattr(settings, "SMTP_PASSWORD", None)
+        smtp_from = getattr(settings, "SMTP_FROM", smtp_user)
+        smtp_use_tls = getattr(settings, "SMTP_USE_TLS", True)
+        smtp_start_tls = getattr(settings, "SMTP_START_TLS", True)
 
     if not smtp_host or not smtp_user:
         logger.warning("Email not configured: SMTP_HOST/SMTP_USER not set")
@@ -46,8 +64,8 @@ async def send_email(recipients: list[str], subject: str, body: str) -> bool:
                 port=smtp_port,
                 username=smtp_user,
                 password=smtp_password,
-                use_tls=getattr(settings, "SMTP_USE_TLS", True),
-                start_tls=getattr(settings, "SMTP_START_TLS", True),
+                use_tls=smtp_use_tls,
+                start_tls=smtp_start_tls,
             )
             logger.info("Email sent to %s: %s", recipient, subject)
             sent += 1

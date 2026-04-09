@@ -9,8 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.core.config import settings
-from app.services import change_request_service
+from app.services import change_request_service, system_setting_service
 
 router = APIRouter()
 
@@ -67,6 +66,8 @@ def _extract_callback_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _build_idempotent_callback_response(
     change_request,
     approver,
+    *,
+    base_url: str = "",
 ) -> dict[str, Any]:
     status_text_map = {
         change_request_service.STATUS_SUCCEEDED: "该变更单已处理完成，无需重复操作",
@@ -100,17 +101,19 @@ def _build_idempotent_callback_response(
             change_request,
             include_actions=False,
             result_note=result_note_map.get(change_request.status, "该变更单已处理。"),
+            base_url=base_url,
         ),
     }
 
 
-def _verify_signature(
+async def _verify_signature(
+    db: AsyncSession,
     raw_body: bytes,
     signature: str | None,
     timestamp: str | None,
     nonce: str | None,
 ) -> None:
-    encrypt_key = settings.FEISHU_APPROVAL_ENCRYPT_KEY
+    encrypt_key = await system_setting_service.get_string(db, "FEISHU_APPROVAL_ENCRYPT_KEY")
     if not encrypt_key:
         return
 
@@ -123,7 +126,7 @@ def _verify_signature(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Feishu callback timestamp")
 
     now = int(time.time())
-    tolerance = settings.FEISHU_APPROVAL_SIGNATURE_TOLERANCE_SECONDS
+    tolerance = await system_setting_service.get_int(db, "FEISHU_APPROVAL_SIGNATURE_TOLERANCE_SECONDS")
     if abs(now - timestamp_int) > tolerance:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Expired Feishu callback timestamp")
 
@@ -153,13 +156,13 @@ async def handle_feishu_change_request_callback(
     if challenge:
         return {"challenge": challenge}
 
-    expected_token = settings.FEISHU_APPROVAL_CALLBACK_TOKEN
+    expected_token = await system_setting_service.get_string(db, "FEISHU_APPROVAL_CALLBACK_TOKEN")
     if expected_token:
         callback_token = _extract_token(body, x_feishu_token)
         if callback_token != expected_token:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Feishu callback token")
 
-    _verify_signature(raw_body, x_lark_signature, x_lark_request_timestamp, x_lark_request_nonce)
+    await _verify_signature(db, raw_body, x_lark_signature, x_lark_request_timestamp, x_lark_request_nonce)
 
     callback = _extract_callback_payload(body)
     action = callback["action"]
@@ -185,6 +188,8 @@ async def handle_feishu_change_request_callback(
     if not approver:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approver is not an active admin")
 
+    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
+
     try:
         if action == "approve":
             updated = await change_request_service.approve_change_request(db, change_request, approver)
@@ -207,7 +212,7 @@ async def handle_feishu_change_request_callback(
     except ValueError as exc:
         refreshed = await change_request_service.get_change_request_by_id(db, request_id_int)
         if refreshed and change_request_service.is_change_request_processed(refreshed):
-            return _build_idempotent_callback_response(refreshed, approver)
+            return _build_idempotent_callback_response(refreshed, approver, base_url=base_url)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     return {
@@ -223,5 +228,6 @@ async def handle_feishu_change_request_callback(
             updated,
             include_actions=False,
             result_note=result_note,
+            base_url=base_url,
         ),
     }

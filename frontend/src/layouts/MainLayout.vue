@@ -40,7 +40,11 @@
           <el-icon><Bell /></el-icon>
           <template #title>告警规则</template>
         </el-menu-item>
-        <el-menu-item index="/users">
+        <el-menu-item v-if="authStore.isAdmin" index="/system-settings">
+          <el-icon><Tools /></el-icon>
+          <template #title>系统配置</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.isAdmin" index="/users">
           <el-icon><UserFilled /></el-icon>
           <template #title>用户管理</template>
         </el-menu-item>
@@ -131,6 +135,7 @@ const titleMap: Record<string, string> = {
   '/dns': 'DNS管理',
   '/change-requests': '审批中心',
   '/alerts': '告警规则',
+  '/system-settings': '系统配置',
   '/users': '用户管理',
 }
 

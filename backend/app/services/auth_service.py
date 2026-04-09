@@ -4,13 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.schemas.user import UserCreate
 from app.core.security import hash_password, verify_password
-from app.core.config import settings
-from app.services import ldap_service
+from app.services import ldap_service, system_setting_service
 
 
 async def authenticate_user(db: AsyncSession, username: str, password: str) -> User | None:
-    if settings.LDAP_ENABLED:
-        ldap_info = await ldap_service.authenticate(username, password)
+    ldap_enabled = await system_setting_service.get_bool(db, "LDAP_ENABLED")
+    if ldap_enabled:
+        ldap_info = await ldap_service.authenticate(db, username, password)
         if not ldap_info:
             return None
         # 查找本地用户

@@ -183,7 +183,7 @@ async def _process_single_rule(db: AsyncSession, rule, now: datetime) -> int:
         email_recipients = [r for r in recipients if "@" in r]
         if email_recipients:
             html_body = markdown_body.replace("\n", "<br>")
-            if await send_email(email_recipients, title, html_body):
+            if await send_email(email_recipients, title, html_body, db=db):
                 total_notifications += 1
 
     if "dingtalk" in channels and recipients:

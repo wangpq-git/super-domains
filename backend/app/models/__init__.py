@@ -6,6 +6,7 @@ from app.models.alert_rule import AlertRule
 from app.models.audit_log import AuditLog
 from app.models.change_request import ChangeRequest
 from app.models.change_request_event import ChangeRequestEvent
+from app.models.system_setting import SystemSetting
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "AuditLog",
     "ChangeRequest",
     "ChangeRequestEvent",
+    "SystemSetting",
 ]

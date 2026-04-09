@@ -49,7 +49,10 @@ async def create_dns_record(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        record = await change_request_service.create_dns_create_request(db, current_user, domain_id, data)
+        if await change_request_service.should_require_approval(db, current_user):
+            record = await change_request_service.create_dns_create_request(db, current_user, domain_id, data)
+        else:
+            record = await change_request_service.execute_dns_create_direct(db, current_user, domain_id, data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return record
@@ -63,7 +66,10 @@ async def update_dns_record(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        record = await change_request_service.create_dns_update_request(db, current_user, record_id, data)
+        if await change_request_service.should_require_approval(db, current_user):
+            record = await change_request_service.create_dns_update_request(db, current_user, record_id, data)
+        else:
+            record = await change_request_service.execute_dns_update_direct(db, current_user, record_id, data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return record
@@ -76,6 +82,8 @@ async def delete_dns_record(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await change_request_service.create_dns_delete_request(db, current_user, record_id)
+        if await change_request_service.should_require_approval(db, current_user):
+            return await change_request_service.create_dns_delete_request(db, current_user, record_id)
+        return await change_request_service.execute_dns_delete_direct(db, current_user, record_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
