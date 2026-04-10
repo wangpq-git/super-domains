@@ -25,7 +25,7 @@
             <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="account_name" label="账户名称" width="280" show-overflow-tooltip sortable="custom" />
+        <el-table-column prop="account_name" label="账户名称" width="240" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
         <el-table-column prop="last_sync_at" label="最后同步" width="200" sortable="custom">
           <template #default="{ row }">{{ row.last_sync_at ? formatDateTime(row.last_sync_at) : '从未同步' }}</template>
@@ -38,7 +38,7 @@
             <el-tag v-else type="info" size="small">未知</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right" align="center">
+        <el-table-column label="操作" width="190" align="center">
           <template #default="{ row }">
             <div class="action-row">
               <el-button v-if="authStore.isAdmin" size="small" class="action-btn" :icon="Connection" @click="handleTest(row)">测试</el-button>
