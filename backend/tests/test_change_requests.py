@@ -13,7 +13,8 @@ from app.models.change_request import ChangeRequest
 from app.models.dns_record import DnsRecord
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
-from app.services import dns_service
+from app.models.user import User
+from app.services import change_request_service, dns_service
 from app.services.change_request_service import build_feishu_change_request_card
 
 
@@ -25,6 +26,63 @@ def _sign_feishu_payload(payload: dict, *, timestamp: str, nonce: str, encrypt_k
     raw_body = _build_feishu_raw_payload(payload)
     string_to_sign = f"{timestamp}{nonce}{encrypt_key}".encode("utf-8") + raw_body
     return hashlib.sha256(string_to_sign).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_resolve_admin_user_prefers_email_lookup(async_session):
+    user = User(
+        username="songxin",
+        email="songxin@adsconflux.com",
+        password_hash="unused",
+        role="admin",
+        is_active=True,
+    )
+    async_session.add(user)
+    await async_session.commit()
+
+    approver = await change_request_service.resolve_admin_user(
+        async_session,
+        {
+            "username": "Completely Different Name",
+            "email": "songxin@adsconflux.com",
+            "open_id": "ou_not_configured",
+        },
+    )
+
+    assert approver is not None
+    assert approver.username == "songxin"
+
+
+@pytest.mark.asyncio
+async def test_resolve_admin_user_supports_email_only_mapping(async_session, monkeypatch):
+    user = User(
+        username="songxin",
+        email="songxin@adsconflux.com",
+        password_hash="unused",
+        role="admin",
+        is_active=True,
+    )
+    async_session.add(user)
+    await async_session.commit()
+
+    async def fake_parse_admin_map(_db):
+        return {
+            "songxin@adsconflux.com": "songxin",
+        }
+
+    monkeypatch.setattr(change_request_service, "_parse_admin_map", fake_parse_admin_map)
+
+    approver = await change_request_service.resolve_admin_user(
+        async_session,
+        {
+            "username": "Wrong Display Name",
+            "email": "SongXin@adsconflux.com",
+            "open_id": "ou_not_configured",
+        },
+    )
+
+    assert approver is not None
+    assert approver.username == "songxin"
 
 
 

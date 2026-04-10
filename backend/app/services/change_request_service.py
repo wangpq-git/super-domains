@@ -842,33 +842,99 @@ async def _parse_admin_map(db: AsyncSession) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _normalize_identifier(value: Any, *, lowercase: bool = False) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    return normalized.lower() if lowercase else normalized
+
+
+def _lookup_admin_mapping(admin_map: dict[str, Any], identifier: Any, *, lowercase: bool = False) -> Any:
+    normalized = _normalize_identifier(identifier, lowercase=lowercase)
+    if normalized is None:
+        return None
+    if normalized in admin_map:
+        return admin_map[normalized]
+    raw = str(identifier)
+    if raw in admin_map:
+        return admin_map[raw]
+    return None
+
+
+async def _get_active_admin_by_field(db: AsyncSession, field: str, value: str) -> User | None:
+    column = getattr(User, field)
+    if field == "email":
+        result = await db.execute(select(User).where(func.lower(column) == value.lower()))
+    else:
+        result = await db.execute(select(User).where(column == value))
+    user = result.scalar_one_or_none()
+    if not user or user.role != "admin" or not user.is_active:
+        return None
+    return user
+
+
+async def _resolve_mapped_admin_user(db: AsyncSession, mapped: Any) -> User | None:
+    if mapped is None:
+        return None
+    if isinstance(mapped, int) or (isinstance(mapped, str) and mapped.strip().isdigit()):
+        return await get_admin_user_by_id(db, int(str(mapped).strip()))
+    if not isinstance(mapped, str):
+        return None
+
+    normalized = mapped.strip()
+    if not normalized:
+        return None
+    if "@" in normalized:
+        user = await _get_active_admin_by_field(db, "email", normalized)
+        if user:
+            return user
+
+    for field in ("username", "display_name"):
+        user = await _get_active_admin_by_field(db, field, normalized)
+        if user:
+            return user
+    return None
+
+
 async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> User | None:
-    query_values = {
-        "username": identifiers.get("username"),
-        "email": identifiers.get("email"),
-        "display_name": identifiers.get("username"),
-    }
+    email = _normalize_identifier(identifiers.get("email"), lowercase=True)
+    username = _normalize_identifier(identifiers.get("username"))
+    display_name = username
 
     admin_map = await _parse_admin_map(db)
-    for key in ("open_id", "union_id", "user_id", "employee_id", "username", "email"):
-        value = identifiers.get(key)
-        if not value:
-            continue
-        mapped = admin_map.get(str(value))
-        if mapped is not None:
-            if isinstance(mapped, int) or (isinstance(mapped, str) and str(mapped).isdigit()):
-                return await get_admin_user_by_id(db, int(mapped))
-            if isinstance(mapped, str) and not query_values.get("username"):
-                query_values["username"] = mapped
 
-    for field in ("username", "email", "display_name"):
-        value = query_values.get(field)
+    # Prefer email when Feishu provides it so the admin map can stay readable
+    # and only require mailbox maintenance in most cases.
+    if email:
+        user = await _get_active_admin_by_field(db, "email", email)
+        if user:
+            return user
+
+        mapped = _lookup_admin_mapping(admin_map, email, lowercase=True)
+        user = await _resolve_mapped_admin_user(db, mapped)
+        if user:
+            return user
+
+        if isinstance(mapped, str) and not username:
+            username = mapped.strip() or username
+            display_name = username
+
+    for key in ("open_id", "union_id", "user_id", "employee_id", "username"):
+        mapped = _lookup_admin_mapping(admin_map, identifiers.get(key))
+        user = await _resolve_mapped_admin_user(db, mapped)
+        if user:
+            return user
+        if isinstance(mapped, str) and not username:
+            username = mapped.strip() or username
+            display_name = username
+
+    for field, value in (("username", username), ("display_name", display_name)):
         if not value:
             continue
-        column = getattr(User, field)
-        result = await db.execute(select(User).where(column == value))
-        user = result.scalar_one_or_none()
-        if user and user.role == "admin" and user.is_active:
+        user = await _get_active_admin_by_field(db, field, value)
+        if user:
             return user
 
     logger.warning("Unable to resolve Feishu approver from identifiers=%s admin_map_keys=%s", identifiers, sorted(admin_map.keys()))
