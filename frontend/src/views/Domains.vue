@@ -10,7 +10,6 @@
         <el-form-item label="状态">
           <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 120px" @change="handleFilter">
             <el-option label="活跃" value="active" />
-            <el-option label="已过期" value="expired" />
             <el-option label="待续费" value="pending" />
           </el-select>
         </el-form-item>

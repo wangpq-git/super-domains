@@ -33,19 +33,21 @@
         </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="authStore.isAdmin" size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
-            <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
-            <el-dropdown v-if="authStore.isAdmin" trigger="click">
-              <el-button size="small">
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item :icon="Edit" @click="openDialog(row)">编辑</el-dropdown-item>
-                  <el-dropdown-item :icon="Delete" divided @click="confirmDelete(row)">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div class="action-row">
+              <el-button v-if="authStore.isAdmin" size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
+              <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
+              <el-dropdown v-if="authStore.isAdmin" trigger="click">
+                <el-button size="small">
+                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :icon="Edit" @click="openDialog(row)">编辑</el-dropdown-item>
+                    <el-dropdown-item :icon="Delete" divided @click="confirmDelete(row)">删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -310,5 +312,14 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 </style>
