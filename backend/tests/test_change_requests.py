@@ -10,9 +10,11 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.change_request import ChangeRequest
+from app.models.dns_record import DnsRecord
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
 from app.services import dns_service
+from app.services.change_request_service import build_feishu_change_request_card
 
 
 def _build_feishu_raw_payload(payload: dict) -> bytes:
@@ -289,11 +291,13 @@ async def test_feishu_callback_approve_executes_request(client, async_session, a
                 "token": "token-123",
             },
             "event": {
+                "operator": {
+                    "username": sample_user.username,
+                },
                 "action": {
                     "value": {
                         "action": "approve",
                         "request_id": str(request_id),
-                        "approver_user_id": str(sample_user.id),
                     }
                 }
             },
@@ -303,7 +307,7 @@ async def test_feishu_callback_approve_executes_request(client, async_session, a
     assert callback_resp.status_code == 200
     data = callback_resp.json()
     assert data["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in data["card"]["elements"])
+    assert all(element["tag"] != "action" for element in data["card"]["data"]["elements"])
 
 
 @pytest.mark.asyncio
@@ -351,11 +355,13 @@ async def test_feishu_callback_reject_marks_request_rejected(client, async_sessi
                 "token": "token-123",
             },
             "event": {
+                "operator": {
+                    "username": sample_user.username,
+                },
                 "action": {
                     "value": {
                         "action": "reject",
                         "request_id": str(request_id),
-                        "approver_user_id": str(sample_user.id),
                         "reason": "not allowed",
                     }
                 }
@@ -366,8 +372,78 @@ async def test_feishu_callback_reject_marks_request_rejected(client, async_sessi
     assert callback_resp.status_code == 200
     data = callback_resp.json()
     assert data["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in data["card"]["elements"])
-    assert any(element["tag"] == "note" for element in data["card"]["elements"])
+    assert all(element["tag"] != "action" for element in data["card"]["data"]["elements"])
+    assert any(element["tag"] == "note" for element in data["card"]["data"]["elements"])
+
+
+@pytest.mark.asyncio
+async def test_feishu_callback_requires_real_operator_identity(client, async_session, auth_headers, sample_user, monkeypatch):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="strict-identity.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    async def fake_create_dns_record(db, domain_id, data):
+        return SimpleNamespace(id=755)
+
+    monkeypatch.setattr(dns_service, "create_dns_record", fake_create_dns_record)
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
+
+    create_resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "cb",
+            "content": "9.9.9.5",
+            "ttl": 120,
+        },
+    )
+    request_id = create_resp.json()["id"]
+
+    callback_resp = await client.post(
+        "/api/v1/webhooks/feishu/change-requests",
+        headers={"X-Feishu-Token": "token-123"},
+        json={
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "token-123",
+            },
+            "event": {
+                "action": {
+                    "value": {
+                        "action": "approve",
+                        "request_id": str(request_id),
+                        "approver_user_id": str(sample_user.id),
+                    }
+                }
+            },
+        },
+    )
+
+    assert callback_resp.status_code == 200
+    data = callback_resp.json()
+    assert data["toast"]["type"] == "error"
+    assert data["toast"]["content"] == "审批人未授权"
+
+    result = await async_session.execute(select(ChangeRequest).where(ChangeRequest.id == request_id))
+    change_request = result.scalar_one()
+    assert change_request.status == "pending_approval"
 
 
 @pytest.mark.asyncio
@@ -437,7 +513,7 @@ async def test_feishu_callback_approve_resolves_operator_username(client, async_
     assert callback_resp.status_code == 200
     data = callback_resp.json()
     assert data["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in data["card"]["elements"])
+    assert all(element["tag"] != "action" for element in data["card"]["data"]["elements"])
 
 
 @pytest.mark.asyncio
@@ -516,7 +592,7 @@ async def test_feishu_callback_validates_signature(client, async_session, auth_h
     )
 
     assert callback_resp.status_code == 200
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
 
 
 @pytest.mark.asyncio
@@ -860,7 +936,7 @@ async def test_repeat_feishu_callback_is_idempotent(client, async_session, auth_
     assert first_resp.status_code == 200
     assert second_resp.status_code == 200
     assert second_resp.json()["toast"]["type"] == "info"
-    assert all(element["tag"] != "action" for element in second_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in second_resp.json()["card"]["data"]["elements"])
     assert call_count == 1
     assert len(sent_payloads) == 1
 
@@ -942,7 +1018,7 @@ async def test_feishu_callback_updates_card_without_sending_extra_result_notific
 
     assert callback_resp.status_code == 200
     assert callback_resp.json()["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
     assert len(sent_payloads) == 1
 
 
@@ -1038,7 +1114,7 @@ async def test_feishu_callback_returns_updated_card_even_when_bot_message_update
 
     assert callback_resp.status_code == 200
     assert callback_resp.json()["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
     assert len(update_calls) == 1
     assert update_calls[0]["message_id"] == "om_stored_message_id"
 
@@ -1129,9 +1205,9 @@ async def test_feishu_reject_callback_returns_updated_card_when_bot_message_upda
 
     assert callback_resp.status_code == 200
     assert callback_resp.json()["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
     assert len(update_calls) == 1
-    assert "拒绝" in json.dumps(callback_resp.json()["card"], ensure_ascii=False)
+    assert "拒绝" in json.dumps(callback_resp.json()["card"]["data"], ensure_ascii=False)
 
 
 @pytest.mark.asyncio
@@ -1335,7 +1411,7 @@ async def test_feishu_reject_after_approve_returns_idempotent_state(client, asyn
     assert approve_resp.status_code == 200
     assert reject_resp.status_code == 200
     assert reject_resp.json()["toast"]["type"] == "info"
-    assert all(element["tag"] != "action" for element in reject_resp.json()["card"]["elements"])
+    assert all(element["tag"] != "action" for element in reject_resp.json()["card"]["data"]["elements"])
     assert call_count == 1
     assert len(sent_payloads) == 1
 
@@ -1349,3 +1425,151 @@ async def test_feishu_callback_challenge_echoes_back(client):
 
     assert resp.status_code == 200
     assert resp.json() == {"challenge": "abc123"}
+
+
+@pytest.mark.asyncio
+async def test_update_request_card_uses_before_snapshot_details(client, async_session, auth_headers):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="ireadpro.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.flush()
+
+    record = DnsRecord(
+        domain_id=domain.id,
+        record_type="TXT",
+        name="test",
+        content="old-value",
+        ttl=3600,
+        sync_status="synced",
+    )
+    async_session.add(record)
+    await async_session.commit()
+    await async_session.refresh(record)
+
+    resp = await client.put(
+        f"/api/v1/dns/records/{record.id}",
+        headers=auth_headers,
+        json={"content": "aaaaa"},
+    )
+
+    assert resp.status_code == 202
+    payload = resp.json()
+    change_request = await async_session.get(ChangeRequest, payload["id"])
+    card = build_feishu_change_request_card(change_request)
+    card_dump = json.dumps(card, ensure_ascii=False)
+    assert "TXT" in card_dump
+    assert "test" in card_dump
+    assert "aaaaa" in card_dump
+    assert "3600" in card_dump
+
+
+@pytest.mark.asyncio
+async def test_delete_request_card_uses_before_snapshot_details(client, async_session, auth_headers):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="ireadpro.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.flush()
+
+    record = DnsRecord(
+        domain_id=domain.id,
+        record_type="TXT",
+        name="test",
+        content="test-value",
+        ttl=3600,
+        sync_status="synced",
+    )
+    async_session.add(record)
+    await async_session.commit()
+    await async_session.refresh(record)
+
+    resp = await client.delete(
+        f"/api/v1/dns/records/{record.id}",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 202
+    payload = resp.json()
+    change_request = await async_session.get(ChangeRequest, payload["id"])
+    card = build_feishu_change_request_card(change_request)
+    card_dump = json.dumps(card, ensure_ascii=False)
+    assert "TXT" in card_dump
+    assert "test" in card_dump
+    assert "test-value" in card_dump
+    assert "3600" in card_dump
+
+
+@pytest.mark.asyncio
+async def test_change_request_card_uses_plain_text_sections_for_better_feishu_layout(
+    client, async_session, auth_headers
+):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="ireadpro.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "TXT",
+            "name": "aaa",
+            "content": "aaa",
+            "ttl": 3600,
+        },
+    )
+
+    assert resp.status_code == 202
+    change_request = await async_session.get(ChangeRequest, resp.json()["id"])
+    card = build_feishu_change_request_card(change_request)
+
+    first_block = card["elements"][0]
+    assert first_block["tag"] == "div"
+    assert first_block["text"]["tag"] == "plain_text"
+    assert "`" not in first_block["text"]["content"]
+
+    field_block = card["elements"][2]
+    assert field_block["tag"] == "div"
+    assert all(field["text"]["tag"] == "plain_text" for field in field_block["fields"])

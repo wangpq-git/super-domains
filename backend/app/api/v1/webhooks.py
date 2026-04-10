@@ -91,10 +91,8 @@ def _extract_callback_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "action": action_name,
         "request_id": request_id,
         "message_id": message_id,
-        "approver_user_id": action_value.get("approver_user_id") or payload.get("approver_user_id"),
         "reason": action_value.get("reason") or payload.get("reason"),
         "actor_identifiers": {
-            "local_user_id": action_value.get("approver_user_id") or payload.get("approver_user_id"),
             "username": (
                 action_value.get("approver_username")
                 or operator.get("username")
@@ -217,7 +215,10 @@ def _build_feishu_action_response(
         }
     }
     if card is not None:
-        response["card"] = card
+        response["card"] = {
+            "type": "raw",
+            "data": card,
+        }
     return response
 
 

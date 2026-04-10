@@ -67,6 +67,15 @@ async def _get_dns_record(db: AsyncSession, record_id: int) -> DnsRecord | None:
     return result.scalar_one_or_none()
 
 
+async def _get_change_request_for_update(db: AsyncSession, change_request_id: int) -> ChangeRequest | None:
+    result = await db.execute(
+        select(ChangeRequest)
+        .where(ChangeRequest.id == change_request_id)
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
 def _domain_platform(domain: Domain | None) -> str:
     if not domain or not domain.account or not domain.account.platform:
         return ""
@@ -112,6 +121,37 @@ def build_feishu_change_request_card(
     result_note: str | None = None,
     base_url: str = "",
 ) -> dict[str, Any]:
+    def _display_value(value: Any, default: str = "-") -> str:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or default
+        if isinstance(value, (list, tuple, set)):
+            rendered = ", ".join(str(item) for item in value if item is not None)
+            return rendered or default
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    def _field(label: str, value: Any, *, is_short: bool = True) -> dict[str, Any]:
+        return {
+            "is_short": is_short,
+            "text": {
+                "tag": "plain_text",
+                "content": f"{label}\n{_display_value(value)}",
+            },
+        }
+
+    def _section(title: str, lines: list[str]) -> dict[str, Any]:
+        return {
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": f"{title}\n" + "\n".join(lines),
+            },
+        }
+
     operation_labels = {
         OP_DNS_CREATE: "新增 DNS 记录",
         OP_DNS_UPDATE: "修改 DNS 记录",
@@ -145,6 +185,9 @@ def build_feishu_change_request_card(
 
     base_url = base_url.rstrip("/")
     payload_data = change_request.payload.get("data", {}) if isinstance(change_request.payload, dict) else {}
+    before_snapshot = change_request.before_snapshot or {}
+    after_snapshot = change_request.after_snapshot or {}
+    merged_snapshot = {**before_snapshot, **after_snapshot}
     created_at = (
         change_request.created_at.replace(tzinfo=UTC).astimezone(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
         if change_request.created_at
@@ -153,108 +196,63 @@ def build_feishu_change_request_card(
     domain_name = (
         (change_request.payload.get("domain_name") if isinstance(change_request.payload, dict) else None)
         or payload_data.get("domain_name")
-        or change_request.after_snapshot.get("domain_name")
-        or change_request.before_snapshot.get("domain_name")
+        or merged_snapshot.get("domain_name")
         or (f"ID {change_request.domain_id}" if change_request.domain_id else "-")
     )
-    record_type = payload_data.get("record_type") or change_request.after_snapshot.get("record_type") or "-"
-    record_name = payload_data.get("name") or change_request.after_snapshot.get("name") or "-"
-    record_value = payload_data.get("content") or change_request.after_snapshot.get("content") or "-"
-    ttl = payload_data.get("ttl") or change_request.after_snapshot.get("ttl") or "-"
+    record_type = payload_data.get("record_type") or merged_snapshot.get("record_type") or "-"
+    record_name = payload_data.get("name") or merged_snapshot.get("name") or "@"
+    record_value = payload_data.get("content") or merged_snapshot.get("content") or "-"
+    ttl = payload_data.get("ttl") or merged_snapshot.get("ttl") or "-"
     status_label = status_labels.get(change_request.status, change_request.status)
     operation_label = operation_labels.get(change_request.operation_type, change_request.operation_type)
     risk_label = risk_labels.get(change_request.risk_level, change_request.risk_level or "-")
     header_template = header_templates.get(change_request.status, "blue")
     requester_name = change_request.requester_name or str(change_request.requester_user_id)
-    summary_text = f"`{domain_name}` · 状态 `{status_label}` · 风险 `{risk_label}`"
+    summary_text = f"{_display_value(domain_name)} · {status_label}"
     if result_note:
-        summary_text = f"`{domain_name}` · `{status_label}`"
+        summary_text = f"{_display_value(domain_name)} · {status_label}"
 
     elements = [
         {
-            "tag": "markdown",
-            "content": (
-                f"**{operation_label}**  \n"
-                f"{summary_text}"
-            ),
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": f"{operation_label}\n{summary_text}",
+            },
         },
         {
-            "tag": "div",
-            "fields": [
+            "tag": "note",
+            "elements": [
                 {
-                    "is_short": True,
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**域名**\n`{domain_name}`",
-                    },
-                },
-                {
-                    "is_short": True,
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**记录类型**\n`{record_type}`",
-                    },
-                },
-                {
-                    "is_short": True,
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**主机记录**\n`{record_name}`",
-                    },
-                },
-                {
-                    "is_short": True,
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**TTL**\n`{ttl}`",
-                    },
-                },
+                    "tag": "plain_text",
+                    "content": f"风险等级：{risk_label}",
+                }
             ],
         },
         {
             "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": (
-                    f"**记录值**\n"
-                    f"`{record_value}`"
-                ),
-            },
+            "fields": [
+                _field("域名", domain_name),
+                _field("记录类型", record_type),
+                _field("主机记录", record_name),
+                _field("TTL", ttl),
+            ],
         },
+        _section("记录值", [_display_value(record_value)]),
         {"tag": "hr"},
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": (
-                    f"**审批信息**\n"
-                    f"> 申请人：{requester_name}\n"
-                    f"> 提交时间：{created_at}\n"
-                    f"> 变更单号：`{change_request.request_no}`"
-                ),
-            },
-        },
+        _section(
+            "审批信息",
+            [
+                f"申请人：{_display_value(requester_name)}",
+                f"提交时间：{created_at}",
+                f"变更单号：{_display_value(change_request.request_no)}",
+            ],
+        ),
     ]
     if result_note:
-        elements.append(
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**处理结果**\n> {result_note}",
-                },
-            }
-        )
+        elements.append(_section("处理结果", [_display_value(result_note)]))
     else:
-        elements.append(
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**当前状态**\n> {status_label}",
-                },
-            }
-        )
+        elements.append(_section("当前状态", [status_label]))
     if include_actions:
         elements.append(
             {
@@ -844,13 +842,6 @@ async def _parse_admin_map(db: AsyncSession) -> dict[str, Any]:
 
 
 async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> User | None:
-    local_user_id = identifiers.get("local_user_id")
-    if local_user_id is not None:
-        try:
-            return await get_admin_user_by_id(db, int(local_user_id))
-        except (TypeError, ValueError):
-            pass
-
     query_values = {
         "username": identifiers.get("username"),
         "email": identifiers.get("email"),
@@ -879,27 +870,6 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
         if user and user.role == "admin" and user.is_active:
             return user
 
-    fallback_candidates: list[Any] = []
-    for mapped in admin_map.values():
-        if mapped not in fallback_candidates:
-            fallback_candidates.append(mapped)
-
-    if len(fallback_candidates) == 1:
-        fallback = fallback_candidates[0]
-        if isinstance(fallback, int) or (isinstance(fallback, str) and fallback.isdigit()):
-            user = await get_admin_user_by_id(db, int(fallback))
-            if user:
-                logger.warning("Falling back to sole mapped Feishu admin id=%s for identifiers=%s", fallback, identifiers)
-                return user
-        elif isinstance(fallback, str):
-            for field in ("username", "email", "display_name"):
-                column = getattr(User, field)
-                result = await db.execute(select(User).where(column == fallback))
-                user = result.scalar_one_or_none()
-                if user and user.role == "admin" and user.is_active:
-                    logger.warning("Falling back to sole mapped Feishu admin=%s for identifiers=%s", fallback, identifiers)
-                    return user
-
     logger.warning("Unable to resolve Feishu approver from identifiers=%s admin_map_keys=%s", identifiers, sorted(admin_map.keys()))
     return None
 
@@ -912,6 +882,7 @@ async def reject_change_request(
     *,
     send_result_notification: bool = True,
 ) -> ChangeRequest:
+    change_request = await _get_change_request_for_update(db, change_request.id) or change_request
     if change_request.status != STATUS_PENDING:
         raise ValueError("Change request has already been processed")
 
@@ -1057,6 +1028,7 @@ async def approve_change_request(
     send_result_notification: bool = True,
 ) -> ChangeRequest:
     request_id = change_request.id
+    change_request = await _get_change_request_for_update(db, request_id) or change_request
     if change_request.status != STATUS_PENDING:
         raise ValueError("Change request has already been processed")
 
