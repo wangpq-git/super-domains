@@ -13,6 +13,7 @@ export interface CosDiscoveryDomainItem {
 
 export interface CosDiscoveryDomainListResponse {
   items: CosDiscoveryDomainItem[]
+  skipped_bucket_count: number
 }
 
 export function getCosDiscoveryConfig() {

@@ -14,3 +14,4 @@ class CosDiscoveryDomainItem(BaseModel):
 
 class CosDiscoveryDomainListResponse(BaseModel):
     items: list[CosDiscoveryDomainItem]
+    skipped_bucket_count: int = 0

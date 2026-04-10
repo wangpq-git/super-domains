@@ -42,7 +42,7 @@
           <el-statistic title="存储桶数" :value="bucketCount" />
         </el-card>
         <el-card shadow="hover" class="stat-card">
-          <el-statistic title="筛选结果" :value="filteredDomainItems.length" />
+          <el-statistic title="已跳过桶数" :value="skippedBucketCount" />
         </el-card>
       </div>
 
@@ -50,7 +50,12 @@
         <template #header>
           <div class="table-header">
             <div class="table-heading">
-              <div class="table-title">COS 自定义域名列表</div>
+              <div class="table-title-row">
+                <div class="table-title">COS 自定义域名列表</div>
+                <el-tag v-if="skippedBucketCount" type="warning" effect="plain">
+                  已跳过 {{ skippedBucketCount }} 个无权限或未配置域名的桶
+                </el-tag>
+              </div>
               <div class="table-subtitle">支持按存储桶名、自定义域名或 CNAME 值快速筛选。</div>
             </div>
             <div class="table-tools">
@@ -121,6 +126,7 @@ const configured = ref(false)
 const loadingConfig = ref(false)
 const loading = ref(false)
 const domainItems = ref<CosDiscoveryDomainItem[]>([])
+const skippedBucketCount = ref(0)
 const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -158,6 +164,7 @@ async function loadConfig() {
     configured.value = data.configured
     if (!configured.value) {
       domainItems.value = []
+      skippedBucketCount.value = 0
       keyword.value = ''
       currentPage.value = 1
     }
@@ -173,10 +180,12 @@ async function loadDomains() {
   try {
     const { data } = await getCosDomains()
     domainItems.value = data.items || []
+    skippedBucketCount.value = data.skipped_bucket_count || 0
     keyword.value = ''
     currentPage.value = 1
   } catch (error: any) {
     domainItems.value = []
+    skippedBucketCount.value = 0
     keyword.value = ''
     currentPage.value = 1
     ElMessage.error(error.response?.data?.detail || '读取 COS 域名失败')
@@ -267,6 +276,13 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.table-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .table-title {
