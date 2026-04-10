@@ -72,3 +72,6 @@ class BasePlatformAdapter(ABC):
     @abstractmethod
     async def delete_dns_record(self, domain: str, record_id: str) -> bool:
         pass
+
+    async def update_nameservers(self, domain: str, nameservers: List[str]) -> bool:
+        raise NotImplementedError(f"{self.__class__.__name__} does not support nameserver updates")

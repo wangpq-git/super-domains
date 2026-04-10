@@ -12,6 +12,15 @@ from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
 from app.services.dns_eligibility import is_dns_managed_by_account
 
 logger = logging.getLogger(__name__)
+DEFAULT_PROXIED_RECORD_TYPES = {"A", "AAAA", "CNAME"}
+
+
+def _normalize_proxied_value(platform: str, record_type: str, proxied: bool | None) -> bool | None:
+    if proxied is not None:
+        return proxied
+    if platform == "cloudflare" and record_type.upper() in DEFAULT_PROXIED_RECORD_TYPES:
+        return True
+    return proxied
 
 
 async def _get_domain_with_account(db: AsyncSession, domain_id: int) -> Domain | None:
@@ -93,11 +102,12 @@ async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCre
     domain = await _get_domain_with_account(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
+    proxied = _normalize_proxied_value(domain.account.platform, data.record_type, data.proxied)
 
     from app.adapters.base import DnsRecordInfo
     record_info = DnsRecordInfo(
         record_type=data.record_type, name=data.name, content=data.content,
-        ttl=data.ttl or 3600, priority=data.priority, proxied=data.proxied,
+        ttl=data.ttl or 3600, priority=data.priority, proxied=proxied,
     )
 
     adapter = get_adapter(domain.account.platform, decrypt_credentials(domain.account.credentials))
@@ -107,7 +117,7 @@ async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCre
     record = DnsRecord(
         domain_id=domain_id, record_type=data.record_type, name=data.name,
         content=data.content, ttl=data.ttl or 3600, priority=data.priority,
-        proxied=data.proxied, external_id=external_id, sync_status="synced",
+        proxied=proxied, external_id=external_id, sync_status="synced",
     )
     db.add(record)
     await db.commit()

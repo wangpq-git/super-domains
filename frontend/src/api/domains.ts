@@ -21,3 +21,7 @@ export function getDomains(params: DomainParams) {
 export function getDomainStats() {
   return request.get('/domains/stats')
 }
+
+export function onboardDomainToCloudflare(domainId: number) {
+  return request.post(`/domains/${domainId}/onboard-cloudflare`)
+}

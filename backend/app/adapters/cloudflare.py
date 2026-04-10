@@ -271,3 +271,111 @@ class CloudflareAdapter(BasePlatformAdapter):
         )
 
         return True
+
+    async def create_zone(self, domain: str) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "/zones",
+            json={
+                "name": domain,
+                "type": "full",
+                "jump_start": False,
+            },
+        )
+        zone = response.get("result", {})
+        zone_id = zone.get("id")
+        if not zone_id:
+            raise RuntimeError("Cloudflare zone creation returned no zone id")
+        self._zone_cache[domain] = zone_id
+        return {
+            "zone_id": zone_id,
+            "status": zone.get("status"),
+            "nameservers": zone.get("name_servers") or [],
+            "zone": zone,
+        }
+
+    async def ensure_cache_rule(
+        self,
+        domain: str,
+        *,
+        expression: str,
+        description: str,
+    ) -> dict[str, Any]:
+        zone_id = await self._get_zone_id(domain)
+        if not zone_id:
+            raise ValueError(f"Zone not found for domain: {domain}")
+
+        new_rule = {
+            "expression": expression,
+            "description": description,
+            "action": "set_cache_settings",
+            "action_parameters": {
+                "cache": True,
+            },
+            "enabled": True,
+        }
+
+        response = await self._request("GET", f"/zones/{zone_id}/rulesets")
+        rulesets = response.get("result", [])
+        ruleset = next(
+            (
+                item
+                for item in rulesets
+                if item.get("kind") == "zone" and item.get("phase") == "http_request_cache_settings"
+            ),
+            None,
+        )
+
+        if ruleset:
+            for rule in ruleset.get("rules", []):
+                if (
+                    rule.get("action") == "set_cache_settings"
+                    and rule.get("expression") == expression
+                    and rule.get("description") == description
+                ):
+                    return {
+                        "zone_id": zone_id,
+                        "ruleset_id": ruleset.get("id"),
+                        "rule_id": rule.get("id"),
+                        "created": False,
+                    }
+
+            updated = await self._request(
+                "PUT",
+                f"/zones/{zone_id}/rulesets/{ruleset['id']}",
+                json={"rules": [*ruleset.get("rules", []), new_rule]},
+            )
+            updated_ruleset = updated.get("result", {})
+            created_rule = next(
+                (
+                    rule
+                    for rule in updated_ruleset.get("rules", [])
+                    if rule.get("expression") == expression and rule.get("description") == description
+                ),
+                None,
+            )
+            return {
+                "zone_id": zone_id,
+                "ruleset_id": updated_ruleset.get("id"),
+                "rule_id": created_rule.get("id") if created_rule else None,
+                "created": True,
+            }
+
+        created = await self._request(
+            "POST",
+            f"/zones/{zone_id}/rulesets",
+            json={
+                "name": "Default cache rules",
+                "kind": "zone",
+                "phase": "http_request_cache_settings",
+                "rules": [new_rule],
+            },
+        )
+        created_ruleset = created.get("result", {})
+        created_rule = (created_ruleset.get("rules") or [{}])[0]
+        return {
+            "zone_id": zone_id,
+            "ruleset_id": created_ruleset.get("id"),
+            "rule_id": created_rule.get("id"),
+            "created": True,
+        }

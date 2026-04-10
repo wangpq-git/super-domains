@@ -116,6 +116,42 @@ def test_dynadot_extracts_response_error():
 
 
 @pytest.mark.asyncio
+async def test_dynadot_update_nameservers_uses_set_ns(monkeypatch):
+    adapter = DynadotAdapter({"api_key": "test-key"})
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status_code": 200}
+
+    captured = {}
+
+    class FakeClient:
+        async def post(self, url, json):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    adapter._client = FakeClient()
+
+    ok = await adapter.update_nameservers(
+        "example.com",
+        ["NS1.CLOUDFLARE.COM", "  ns2.cloudflare.com "],
+    )
+
+    assert ok is True
+    assert captured["url"] == adapter.BASE_URL
+    assert captured["json"] == {
+        "key": "test-key",
+        "command": "set_ns",
+        "domain": "example.com",
+        "name_server": ["ns1.cloudflare.com", "ns2.cloudflare.com"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_porkbun_get_domain_nameservers_falls_back_to_public_dns(monkeypatch):
     adapter = PorkbunAdapter({"api_key": "test", "secret_key": "secret"})
 

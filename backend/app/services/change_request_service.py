@@ -16,6 +16,7 @@ from app.models.change_request import ChangeRequest
 from app.models.change_request_event import ChangeRequestEvent
 from app.models.dns_record import DnsRecord
 from app.models.domain import Domain
+from app.models.platform_account import PlatformAccount
 from app.models.user import User
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
 from app.services import dns_service, system_setting_service
@@ -37,6 +38,7 @@ OP_DNS_UPDATE = "dns_update"
 OP_DNS_DELETE = "dns_delete"
 OP_BATCH_DNS_UPDATE = "batch_dns_update"
 OP_BATCH_NAMESERVER_UPDATE = "batch_nameserver_update"
+OP_CLOUDFLARE_ONBOARD = "cloudflare_onboard"
 
 TERMINAL_STATUSES = {
     STATUS_REJECTED,
@@ -47,6 +49,12 @@ TERMINAL_STATUSES = {
 
 CLOUDFLARE_PLATFORM = "cloudflare"
 CLOUDFLARE_ONLY_CHANGE_MESSAGE = "目前仅支持修改 Cloudflare 平台上的域名"
+NAMESERVER_UPDATE_SUPPORTED_PLATFORMS = {"dynadot"}
+NAMESERVER_UPDATE_ONLY_MESSAGE = "目前仅支持修改 Dynadot 域名的 NS"
+CLOUDFLARE_ONBOARD_ONLY_MESSAGE = "目前仅支持将 Dynadot 域名接入 Cloudflare"
+CLOUDFLARE_ACCOUNT_DOMAIN_LIMIT = 80
+CLOUDFLARE_CACHE_RULE_DESCRIPTION = "Cache Everything"
+CLOUDFLARE_CACHE_RULE_EXPRESSION = '(not starts_with(http.request.uri.path, "/api/")) or (not starts_with(http.request.uri.path, "/wp-"))'
 
 
 async def _get_domain(db: AsyncSession, domain_id: int) -> Domain | None:
@@ -92,6 +100,64 @@ def _ensure_domains_change_supported(domains: list[Domain]) -> None:
     unsupported = [domain.domain_name for domain in domains if _domain_platform(domain) != CLOUDFLARE_PLATFORM]
     if unsupported:
         raise ValueError(f"{CLOUDFLARE_ONLY_CHANGE_MESSAGE}: {', '.join(unsupported[:3])}")
+
+
+def _ensure_nameserver_change_supported(domain: Domain | None) -> None:
+    if _domain_platform(domain) not in NAMESERVER_UPDATE_SUPPORTED_PLATFORMS:
+        raise ValueError(NAMESERVER_UPDATE_ONLY_MESSAGE)
+
+
+def _ensure_nameserver_changes_supported(domains: list[Domain]) -> None:
+    unsupported = [
+        domain.domain_name
+        for domain in domains
+        if _domain_platform(domain) not in NAMESERVER_UPDATE_SUPPORTED_PLATFORMS
+    ]
+    if unsupported:
+        raise ValueError(f"{NAMESERVER_UPDATE_ONLY_MESSAGE}: {', '.join(unsupported[:3])}")
+
+
+def _ensure_cloudflare_onboard_supported(domain: Domain | None) -> None:
+    if _domain_platform(domain) not in NAMESERVER_UPDATE_SUPPORTED_PLATFORMS:
+        raise ValueError(CLOUDFLARE_ONBOARD_ONLY_MESSAGE)
+
+
+async def _find_existing_cloudflare_domain(db: AsyncSession, domain_name: str) -> Domain | None:
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .join(PlatformAccount, PlatformAccount.id == Domain.account_id)
+        .where(
+            Domain.domain_name == domain_name,
+            Domain.status != "removed",
+            PlatformAccount.platform == CLOUDFLARE_PLATFORM,
+        )
+    )
+    return result.scalars().first()
+
+
+async def _select_cloudflare_target_account(db: AsyncSession) -> tuple[PlatformAccount, int]:
+    result = await db.execute(
+        select(
+            PlatformAccount,
+            func.count(Domain.id).label("domain_count"),
+        )
+        .outerjoin(
+            Domain,
+            (Domain.account_id == PlatformAccount.id) & (Domain.status != "removed"),
+        )
+        .where(
+            PlatformAccount.platform == CLOUDFLARE_PLATFORM,
+            PlatformAccount.is_active == True,
+        )
+        .group_by(PlatformAccount.id)
+        .having(func.count(Domain.id) < CLOUDFLARE_ACCOUNT_DOMAIN_LIMIT)
+        .order_by(func.count(Domain.id).asc(), PlatformAccount.id.asc())
+    )
+    row = result.first()
+    if not row:
+        raise ValueError(f"没有可用的 Cloudflare 账号（要求域名数 < {CLOUDFLARE_ACCOUNT_DOMAIN_LIMIT}）")
+    return row[0], int(row[1] or 0)
 
 
 async def _add_event(
@@ -159,6 +225,7 @@ def build_feishu_change_request_card(
         OP_DNS_DELETE: "删除 DNS 记录",
         OP_BATCH_DNS_UPDATE: "批量修改 DNS",
         OP_BATCH_NAMESERVER_UPDATE: "批量修改 NS",
+        OP_CLOUDFLARE_ONBOARD: "接入 Cloudflare",
     }
     status_labels = {
         STATUS_PENDING: "待审批",
@@ -212,6 +279,104 @@ def build_feishu_change_request_card(
     summary_text = f"{_display_value(domain_name)} · {status_label}"
     if result_note:
         summary_text = f"{_display_value(domain_name)} · {status_label}"
+
+    if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
+        execution = change_request.execution_result or {}
+        target_account_name = (
+            (change_request.payload.get("target_account_name") if isinstance(change_request.payload, dict) else None)
+            or execution.get("target_account_name")
+            or "-"
+        )
+        source_platform = (
+            (change_request.payload.get("source_platform") if isinstance(change_request.payload, dict) else None)
+            or "-"
+        )
+        nameservers = execution.get("nameservers") or "-"
+        cache_rule_expression = (
+            (change_request.payload.get("cache_rule", {}) if isinstance(change_request.payload, dict) else {}).get("expression")
+            or "-"
+        )
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "plain_text",
+                    "content": f"{operation_label}\n{summary_text}",
+                },
+            },
+            {
+                "tag": "note",
+                "elements": [
+                    {
+                        "tag": "plain_text",
+                        "content": f"风险等级：{risk_label}",
+                    }
+                ],
+            },
+            {
+                "tag": "div",
+                "fields": [
+                    _field("域名", domain_name),
+                    _field("来源平台", source_platform),
+                    _field("目标账号", target_account_name),
+                    _field("默认代理", "开启"),
+                ],
+            },
+            _section("缓存规则", [cache_rule_expression]),
+            _section("目标 NS", [_display_value(nameservers)]),
+            {"tag": "hr"},
+            _section(
+                "审批信息",
+                [
+                    f"申请人：{_display_value(requester_name)}",
+                    f"提交时间：{created_at}",
+                    f"变更单号：{_display_value(change_request.request_no)}",
+                ],
+            ),
+        ]
+        if result_note:
+            elements.append(_section("处理结果", [_display_value(result_note)]))
+        else:
+            elements.append(_section("当前状态", [status_label]))
+        if include_actions:
+            elements.append(
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "批准"},
+                            "type": "primary",
+                            "value": json.dumps({"action": "approve", "request_id": change_request.id}, ensure_ascii=False),
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "拒绝"},
+                            "type": "danger",
+                            "value": json.dumps({"action": "reject", "request_id": change_request.id}, ensure_ascii=False),
+                        },
+                    ],
+                }
+            )
+        elements.append(
+            {
+                "tag": "note",
+                "elements": [
+                    {
+                        "tag": "plain_text",
+                        "content": f"请求 ID：{change_request.id} · 目标类型：{change_request.target_type}",
+                    }
+                ],
+            }
+        )
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": header_template,
+                "title": {"tag": "plain_text", "content": f"{operation_label} · {status_label}"},
+            },
+            "elements": elements,
+        }
 
     elements = [
         {
@@ -709,7 +874,7 @@ async def create_batch_nameserver_request(db: AsyncSession, user: User, body: di
         .where(Domain.id.in_(domain_ids))
     )
     domains = result.scalars().all()
-    _ensure_domains_change_supported(domains)
+    _ensure_nameserver_changes_supported(domains)
     return await _create_request(
         db,
         user=user,
@@ -755,7 +920,7 @@ async def execute_batch_nameserver_direct(db: AsyncSession, user: User, body: di
         .options(selectinload(Domain.account))
         .where(Domain.id.in_(body.get("domain_ids") or []))
     )
-    _ensure_domains_change_supported(result.scalars().all())
+    _ensure_nameserver_changes_supported(result.scalars().all())
     result = await _execute_batch_nameservers(db, body)
     domain_ids = body.get("domain_ids") or []
     return _build_direct_result(
@@ -766,6 +931,71 @@ async def execute_batch_nameserver_direct(db: AsyncSession, user: User, body: di
         domain_id=domain_ids[0] if domain_ids else None,
         payload=body,
         execution_result=result,
+    )
+
+
+async def create_cloudflare_onboard_request(db: AsyncSession, user: User, domain_id: int) -> ChangeRequest:
+    domain = await _get_domain(db, domain_id)
+    if not domain:
+        raise ValueError(f"Domain {domain_id} not found")
+    _ensure_cloudflare_onboard_supported(domain)
+
+    existing = await _find_existing_cloudflare_domain(db, domain.domain_name)
+    if existing:
+        raise ValueError(f"域名 {domain.domain_name} 已存在于 Cloudflare 账户 {existing.account.account_name}")
+
+    target_account, domain_count = await _select_cloudflare_target_account(db)
+    payload = {
+        "source_domain_id": domain.id,
+        "source_account_id": domain.account_id,
+        "source_platform": _domain_platform(domain),
+        "domain_name": domain.domain_name,
+        "target_platform": CLOUDFLARE_PLATFORM,
+        "target_account_id": target_account.id,
+        "target_account_name": target_account.account_name,
+        "target_account_domain_count": domain_count,
+        "default_proxied": True,
+        "cache_rule": {
+            "description": CLOUDFLARE_CACHE_RULE_DESCRIPTION,
+            "expression": CLOUDFLARE_CACHE_RULE_EXPRESSION,
+        },
+    }
+    return await _create_request(
+        db,
+        user=user,
+        source="api",
+        operation_type=OP_CLOUDFLARE_ONBOARD,
+        target_type="domain",
+        target_id=domain.id,
+        domain_id=domain.id,
+        payload=payload,
+        before_snapshot={
+            "platform": _domain_platform(domain),
+            "account_id": domain.account_id,
+            "account_name": domain.account.account_name if domain.account else None,
+            "nameservers": domain.nameservers,
+        },
+        after_snapshot={
+            "target_platform": CLOUDFLARE_PLATFORM,
+            "target_account_id": target_account.id,
+            "target_account_name": target_account.account_name,
+            "default_proxied": True,
+            "cache_rule_expression": CLOUDFLARE_CACHE_RULE_EXPRESSION,
+        },
+    )
+
+
+async def execute_cloudflare_onboard_direct(db: AsyncSession, user: User, domain_id: int) -> ChangeRequest:
+    change_request = await create_cloudflare_onboard_request(db, user, domain_id)
+    execution_result = await _execute_cloudflare_onboard(db, change_request.payload)
+    return _build_direct_result(
+        user=user,
+        operation_type=OP_CLOUDFLARE_ONBOARD,
+        target_type="domain",
+        target_id=domain_id,
+        domain_id=domain_id,
+        payload=change_request.payload,
+        execution_result=execution_result,
     )
 
 
@@ -1034,25 +1264,123 @@ async def _execute_batch_dns(db: AsyncSession, payload: dict[str, Any]) -> dict[
     return {"total": len(payload.get("domain_ids", [])), "results": results}
 
 
+async def _execute_cloudflare_onboard(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
+    source_domain = await _get_domain(db, payload["source_domain_id"])
+    if not source_domain:
+        raise ValueError(f"Domain {payload['source_domain_id']} not found")
+    _ensure_cloudflare_onboard_supported(source_domain)
+
+    result = await db.execute(
+        select(PlatformAccount).where(PlatformAccount.id == payload["target_account_id"])
+    )
+    target_account = result.scalar_one_or_none()
+    if not target_account or target_account.platform != CLOUDFLARE_PLATFORM or not target_account.is_active:
+        raise ValueError("目标 Cloudflare 账号不存在或不可用")
+
+    existing = await _find_existing_cloudflare_domain(db, source_domain.domain_name)
+    if existing and existing.account_id != target_account.id:
+        raise ValueError(f"域名 {source_domain.domain_name} 已存在于 Cloudflare 账户 {existing.account.account_name}")
+
+    adapter = get_adapter(target_account.platform, decrypt_credentials(target_account.credentials))
+    async with adapter:
+        zone_result = await adapter.create_zone(source_domain.domain_name)
+        cache_rule_result = await adapter.ensure_cache_rule(
+            source_domain.domain_name,
+            expression=payload["cache_rule"]["expression"],
+            description=payload["cache_rule"]["description"],
+        )
+
+    nameservers = [str(ns).strip().lower() for ns in (zone_result.get("nameservers") or []) if str(ns).strip()]
+    if len(nameservers) < 2:
+        raise RuntimeError("Cloudflare zone did not return valid nameservers")
+
+    source_adapter = get_adapter(source_domain.account.platform, decrypt_credentials(source_domain.account.credentials))
+    async with source_adapter:
+        await source_adapter.update_nameservers(source_domain.domain_name, nameservers)
+
+    cloudflare_domain = existing
+    if not cloudflare_domain:
+        cloudflare_domain = Domain(
+            account_id=target_account.id,
+            domain_name=source_domain.domain_name,
+            tld=source_domain.tld,
+            status=str(zone_result.get("status") or "pending"),
+            registration_date=source_domain.registration_date,
+            expiry_date=source_domain.expiry_date,
+            auto_renew=False,
+            locked=False,
+            whois_privacy=False,
+            nameservers=nameservers,
+            external_id=zone_result.get("zone_id"),
+            raw_data=zone_result.get("zone") or {},
+            last_synced_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        db.add(cloudflare_domain)
+    else:
+        cloudflare_domain.status = str(zone_result.get("status") or cloudflare_domain.status or "pending")
+        cloudflare_domain.nameservers = nameservers
+        cloudflare_domain.external_id = zone_result.get("zone_id") or cloudflare_domain.external_id
+        cloudflare_domain.raw_data = zone_result.get("zone") or cloudflare_domain.raw_data
+        cloudflare_domain.last_synced_at = datetime.now(UTC).replace(tzinfo=None)
+
+    source_domain.nameservers = nameservers
+    source_domain.raw_data = {
+        **(source_domain.raw_data or {}),
+        "cloudflare_target_account_id": target_account.id,
+        "cloudflare_target_account_name": target_account.account_name,
+    }
+
+    await db.commit()
+    if cloudflare_domain.id:
+        await db.refresh(cloudflare_domain)
+
+    return {
+        "source_domain_id": source_domain.id,
+        "source_platform": _domain_platform(source_domain),
+        "cloudflare_domain_id": cloudflare_domain.id,
+        "target_account_id": target_account.id,
+        "target_account_name": target_account.account_name,
+        "zone_id": zone_result.get("zone_id"),
+        "nameservers": nameservers,
+        "default_proxied": True,
+        "cache_rule": {
+            "description": payload["cache_rule"]["description"],
+            "expression": payload["cache_rule"]["expression"],
+            "rule_id": cache_rule_result.get("rule_id"),
+            "ruleset_id": cache_rule_result.get("ruleset_id"),
+        },
+    }
+
+
 async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
     results = []
+    requested_nameservers = [str(ns).strip().lower() for ns in (payload.get("nameservers") or []) if str(ns).strip()]
+    if len(requested_nameservers) < 2:
+        raise ValueError("At least 2 nameservers are required")
+
     for domain_id in payload.get("domain_ids", []):
         domain = await _get_domain(db, domain_id)
         if not domain:
             results.append({"domain_id": domain_id, "status": "error", "message": "域名不存在"})
             continue
         try:
-            _ensure_domain_change_supported(domain)
+            _ensure_nameserver_change_supported(domain)
         except ValueError as exc:
             results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "error", "message": str(exc)})
             continue
         try:
-            domain.nameservers = payload.get("nameservers", [])
+            account = domain.account
+            if not account:
+                raise RuntimeError("域名缺少平台账户信息")
+            adapter = get_adapter(account.platform, decrypt_credentials(account.credentials))
+            async with adapter:
+                await adapter.update_nameservers(domain.domain_name, requested_nameservers)
+            domain.nameservers = requested_nameservers
             results.append({
                 "domain_id": domain_id,
                 "domain_name": domain.domain_name,
                 "status": "success",
-                "nameservers": payload.get("nameservers", []),
+                "nameservers": requested_nameservers,
             })
         except Exception as exc:
             logger.error("Batch nameserver update failed for domain %s: %s", domain.domain_name, exc)
@@ -1082,6 +1410,8 @@ async def _execute_change_request(db: AsyncSession, change_request: ChangeReques
         return {"record_id": payload["record_id"]}
     if change_request.operation_type == OP_BATCH_DNS_UPDATE:
         return await _execute_batch_dns(db, change_request.payload)
+    if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
+        return await _execute_cloudflare_onboard(db, change_request.payload)
     if change_request.operation_type == OP_BATCH_NAMESERVER_UPDATE:
         return await _execute_batch_nameservers(db, change_request.payload)
     raise ValueError(f"Unsupported operation type: {change_request.operation_type}")

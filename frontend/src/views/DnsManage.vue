@@ -147,7 +147,7 @@ const dnsSortOrder = ref('asc')
 
 const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
 
-const defaultForm = { record_type: 'A', name: '', content: '', ttl: 3600, priority: 0, proxied: false }
+const defaultForm = { record_type: 'A', name: '', content: '', ttl: 3600, priority: 0, proxied: true }
 const form = ref({ ...defaultForm })
 
 const showPriority = computed(() => ['MX', 'SRV'].includes(form.value.record_type))

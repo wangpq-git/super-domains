@@ -40,7 +40,7 @@
     <el-card shadow="never" style="margin-top: 16px">
       <div v-if="selectedDomains.length > 0" class="batch-bar">
         <span class="batch-info">已选择 {{ selectedDomains.length }} 项</span>
-        <el-tag v-if="hasUnsupportedSelection" type="danger" effect="light">仅 Cloudflare 域名支持变更</el-tag>
+        <el-tag v-if="hasUnsupportedSelection" type="danger" effect="light">仅 Dynadot 域名支持 NS 变更</el-tag>
         <el-button type="primary" :loading="batchLoading" @click="handleBatchSync">批量同步</el-button>
         <el-button
           v-if="authStore.isAdmin"
@@ -110,6 +110,20 @@
             <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.platform === 'dynadot'"
+              size="small"
+              type="primary"
+              :loading="onboardingDomainId === row.id"
+              @click="handleOnboardCloudflare(row)"
+            >
+              接入CF
+            </el-button>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div class="pagination-wrapper">
@@ -155,6 +169,7 @@ import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
 import { useAuthStore } from '@/stores/auth'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
+import { onboardDomainToCloudflare } from '@/api/domains'
 import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
 interface DomainRow {
@@ -173,11 +188,12 @@ const dateRange = ref<string[]>([])
 const tableRef = ref<InstanceType<typeof ElTable>>()
 const selectedDomains = ref<DomainRow[]>([])
 const batchLoading = ref(false)
+const onboardingDomainId = ref<number | null>(null)
 const showNsDialog = ref(false)
 const nsForm = reactive<string[]>(['', ''])
 
 const platforms = ['cloudflare', 'namecom', 'dynadot', 'godaddy', 'namecheap', 'namesilo', 'openprovider', 'porkbun', 'spaceship']
-const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'cloudflare'))
+const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'dynadot'))
 
 function handleSelectionChange(rows: DomainRow[]) {
   selectedDomains.value = rows
@@ -266,7 +282,7 @@ async function handleBatchSync() {
 
 async function handleBatchNs() {
   if (hasUnsupportedSelection.value) {
-    ElMessage.warning('当前仅支持批量修改 Cloudflare 域名')
+    ElMessage.warning('当前仅支持批量修改 Dynadot 域名的 NS')
     return
   }
   const nameservers = nsForm.filter(ns => ns.trim())
@@ -289,6 +305,24 @@ async function handleBatchNs() {
     ElMessage.error('批量修改NS失败')
   } finally {
     batchLoading.value = false
+  }
+}
+
+async function handleOnboardCloudflare(row: DomainRow) {
+  onboardingDomainId.value = row.id
+  try {
+    const res = await onboardDomainToCloudflare(row.id)
+    const data = res.data as any
+    if (data.status === 'pending_approval') {
+      ElMessage.success(`已提交 Cloudflare 接入审批，目标账号：${data.payload?.target_account_name ?? '-'}`)
+    } else {
+      ElMessage.success(`Cloudflare 接入完成，目标账号：${data.execution_result?.target_account_name ?? '-'}`)
+    }
+    store.fetchDomains()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || 'Cloudflare 接入失败')
+  } finally {
+    onboardingDomainId.value = null
   }
 }
 

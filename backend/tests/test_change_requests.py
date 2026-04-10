@@ -165,7 +165,7 @@ async def test_create_dns_record_rejects_non_cloudflare_domain(client, async_ses
 
 
 @pytest.mark.asyncio
-async def test_batch_nameserver_request_rejects_non_cloudflare_domain(client, async_session, auth_headers):
+async def test_batch_nameserver_request_rejects_non_dynadot_domain(client, async_session, auth_headers):
     account = PlatformAccount(
         platform="namecom",
         account_name="namecom-test",
@@ -196,7 +196,295 @@ async def test_batch_nameserver_request_rejects_non_cloudflare_domain(client, as
     )
 
     assert resp.status_code == 400
-    assert "目前仅支持修改 Cloudflare 平台上的域名" in resp.json()["detail"]
+    assert "目前仅支持修改 Dynadot 域名的 NS" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_batch_nameserver_request_creates_pending_request_for_dynadot_domain(client, async_session, auth_headers, monkeypatch):
+    account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="pending-ns.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    async def require_approval(_db, _user):
+        return True
+
+    monkeypatch.setattr(change_request_service, "should_require_approval", require_approval)
+
+    resp = await client.post(
+        "/api/v1/batch/nameservers",
+        headers=auth_headers,
+        json={
+            "domain_ids": [domain.id],
+            "nameservers": ["olivia.ns.cloudflare.com", "quentin.ns.cloudflare.com"],
+        },
+    )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "pending_approval"
+    assert data["operation_type"] == "batch_nameserver_update"
+
+
+@pytest.mark.asyncio
+async def test_batch_nameserver_direct_executes_dynadot_update(client, async_session, auth_headers, monkeypatch):
+    account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="ns-update.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    async def skip_approval(_db, _user):
+        return False
+
+    class FakeAdapter:
+        def __init__(self):
+            self.calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def update_nameservers(self, domain_name, nameservers):
+            self.calls.append((domain_name, nameservers))
+            return True
+
+    fake_adapter = FakeAdapter()
+
+    monkeypatch.setattr(change_request_service, "should_require_approval", skip_approval)
+    monkeypatch.setattr(change_request_service, "decrypt_credentials", lambda value: value)
+    monkeypatch.setattr(change_request_service, "get_adapter", lambda platform, credentials: fake_adapter)
+
+    resp = await client.post(
+        "/api/v1/batch/nameservers",
+        headers=auth_headers,
+        json={
+            "domain_ids": [domain.id],
+            "nameservers": ["olivia.ns.cloudflare.com", "quentin.ns.cloudflare.com"],
+        },
+    )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "succeeded"
+    assert fake_adapter.calls == [
+        ("ns-update.example.com", ["olivia.ns.cloudflare.com", "quentin.ns.cloudflare.com"])
+    ]
+
+    await async_session.refresh(domain)
+    assert domain.nameservers == ["olivia.ns.cloudflare.com", "quentin.ns.cloudflare.com"]
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_onboard_request_selects_least_loaded_available_account(client, async_session, auth_headers):
+    source_account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-source",
+        credentials="{}",
+        is_active=True,
+    )
+    cf_busy = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-busy",
+        credentials="{}",
+        is_active=True,
+    )
+    cf_best = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-best",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add_all([source_account, cf_busy, cf_best])
+    await async_session.flush()
+
+    source_domain = Domain(
+        account_id=source_account.id,
+        domain_name="migrate.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(source_domain)
+
+    for idx in range(3):
+        async_session.add(
+            Domain(
+                account_id=cf_busy.id,
+                domain_name=f"busy-{idx}.example.com",
+                status="active",
+                expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+                nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+            )
+        )
+
+    async_session.add(
+        Domain(
+            account_id=cf_best.id,
+            domain_name="best-0.example.com",
+            status="active",
+            expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+            nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+        )
+    )
+
+    await async_session.commit()
+    await async_session.refresh(source_domain)
+
+    resp = await client.post(
+        f"/api/v1/domains/{source_domain.id}/onboard-cloudflare",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "pending_approval"
+    assert data["operation_type"] == "cloudflare_onboard"
+    assert data["payload"]["target_account_id"] == cf_best.id
+    assert data["payload"]["target_account_name"] == "cf-best"
+    assert data["payload"]["default_proxied"] is True
+    assert data["payload"]["cache_rule"]["expression"]
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_onboard_direct_executes_zone_creation_cache_rule_and_ns_update(client, async_session, auth_headers, monkeypatch):
+    source_account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-source",
+        credentials="{}",
+        is_active=True,
+    )
+    target_account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-target",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add_all([source_account, target_account])
+    await async_session.flush()
+
+    source_domain = Domain(
+        account_id=source_account.id,
+        domain_name="direct-migrate.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(source_domain)
+    await async_session.commit()
+    await async_session.refresh(source_domain)
+
+    async def skip_approval(_db, _user):
+        return False
+
+    class FakeDynadotAdapter:
+        def __init__(self):
+            self.calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def update_nameservers(self, domain_name, nameservers):
+            self.calls.append((domain_name, nameservers))
+            return True
+
+    class FakeCloudflareAdapter:
+        def __init__(self):
+            self.zone_calls = []
+            self.cache_calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def create_zone(self, domain_name):
+            self.zone_calls.append(domain_name)
+            return {
+                "zone_id": "zone-123",
+                "status": "pending",
+                "nameservers": ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+                "zone": {"id": "zone-123", "name": domain_name, "status": "pending"},
+            }
+
+        async def ensure_cache_rule(self, domain_name, *, expression, description):
+            self.cache_calls.append((domain_name, expression, description))
+            return {"rule_id": "rule-1", "ruleset_id": "ruleset-1", "created": True}
+
+    fake_dynadot = FakeDynadotAdapter()
+    fake_cloudflare = FakeCloudflareAdapter()
+
+    def fake_get_adapter(platform, _credentials):
+        if platform == "dynadot":
+            return fake_dynadot
+        if platform == "cloudflare":
+            return fake_cloudflare
+        raise AssertionError(f"unexpected platform {platform}")
+
+    monkeypatch.setattr(change_request_service, "should_require_approval", skip_approval)
+    monkeypatch.setattr(change_request_service, "decrypt_credentials", lambda value: value)
+    monkeypatch.setattr(change_request_service, "get_adapter", fake_get_adapter)
+
+    resp = await client.post(
+        f"/api/v1/domains/{source_domain.id}/onboard-cloudflare",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "succeeded"
+    assert data["operation_type"] == "cloudflare_onboard"
+    assert data["execution_result"]["target_account_id"] == target_account.id
+    assert data["execution_result"]["nameservers"] == ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"]
+    assert fake_cloudflare.zone_calls == ["direct-migrate.example.com"]
+    assert fake_dynadot.calls == [
+        ("direct-migrate.example.com", ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"])
+    ]
+
+    await async_session.refresh(source_domain)
+    assert source_domain.nameservers == ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"]
+
+    result = await async_session.execute(
+        select(Domain).where(Domain.account_id == target_account.id, Domain.domain_name == "direct-migrate.example.com")
+    )
+    cf_domain = result.scalar_one()
+    assert cf_domain.external_id == "zone-123"
+    assert cf_domain.nameservers == ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"]
 
 
 @pytest.mark.asyncio

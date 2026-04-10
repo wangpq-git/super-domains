@@ -30,6 +30,7 @@
             <el-option label="DNS 删除" value="dns_delete" />
             <el-option label="批量 DNS" value="batch_dns_update" />
             <el-option label="批量 NS" value="batch_nameserver_update" />
+            <el-option label="接入 Cloudflare" value="cloudflare_onboard" />
           </el-select>
         </el-form-item>
         <el-form-item label="关键词">
@@ -51,7 +52,7 @@
         <el-table-column prop="request_no" label="申请单号" width="140" />
         <el-table-column prop="operation_type" label="操作" width="160">
           <template #default="{ row }">
-            <el-tag size="small">{{ row.operation_type }}</el-tag>
+            <el-tag size="small">{{ operationLabel(row.operation_type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="requester_name" label="申请人" width="130">
@@ -132,7 +133,7 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="申请单号">{{ currentRequest.request_no }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ currentRequest.status }}</el-descriptions-item>
-          <el-descriptions-item label="操作类型">{{ currentRequest.operation_type }}</el-descriptions-item>
+          <el-descriptions-item label="操作类型">{{ operationLabel(currentRequest.operation_type) }}</el-descriptions-item>
           <el-descriptions-item label="审批人">{{ currentRequest.approver_name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="申请人">
             {{ currentRequest.requester_name || currentRequest.requester_user_id }}
@@ -229,6 +230,18 @@ function prettyJson(value: Record<string, any> | null | undefined) {
 function compactPayload(value: Record<string, any>) {
   const raw = JSON.stringify(value || {})
   return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw
+}
+
+function operationLabel(operationType: string) {
+  const mapping: Record<string, string> = {
+    dns_create: 'DNS 新增',
+    dns_update: 'DNS 更新',
+    dns_delete: 'DNS 删除',
+    batch_dns_update: '批量 DNS',
+    batch_nameserver_update: '批量 NS',
+    cloudflare_onboard: '接入 Cloudflare',
+  }
+  return mapping[operationType] || operationType
 }
 
 function summarizeTarget(row: ChangeRequest) {
