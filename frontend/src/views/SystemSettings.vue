@@ -71,8 +71,16 @@
                   v-else-if="item.value_type === 'json'"
                   v-model="draftMap[item.key]"
                   type="textarea"
-                  :rows="6"
+                  :rows="item.rows || 6"
                   placeholder='请输入 JSON，例如 {"ou_xxx":"admin"}'
+                />
+
+                <el-input
+                  v-else-if="item.ui_type === 'textarea'"
+                  v-model="draftMap[item.key]"
+                  type="textarea"
+                  :rows="item.rows || 8"
+                  :placeholder="item.is_secret ? secretPlaceholder(item) : '请输入配置值'"
                 />
 
                 <el-input
@@ -112,6 +120,7 @@ const categories = [
   { key: 'approval', label: '审批策略' },
   { key: 'feishu', label: '飞书审批' },
   { key: 'ldap', label: 'LDAP 登录' },
+  { key: 'service_discovery', label: '服务解析' },
   { key: 'notification', label: '通知配置' }
 ]
 

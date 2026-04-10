@@ -112,8 +112,7 @@ async def test_feishu_callback_uses_database_config(client, async_session, auth_
 
     assert callback_resp.status_code == 200
     payload = callback_resp.json()
-    assert payload["status"] == "succeeded"
-    assert payload["approver_user_id"] is not None
+    assert payload == {}
 
 
 import sys

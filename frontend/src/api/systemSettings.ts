@@ -6,6 +6,8 @@ export interface SystemSettingItem {
   label: string
   description?: string | null
   value_type: 'string' | 'boolean' | 'integer' | 'json'
+  ui_type?: 'input' | 'textarea'
+  rows?: number | null
   is_secret: boolean
   restart_required: boolean
   value: any

@@ -9,6 +9,8 @@ class SystemSettingItem(BaseModel):
     label: str
     description: str | None = None
     value_type: str
+    ui_type: str = "input"
+    rows: int | None = None
     is_secret: bool
     restart_required: bool
     value: Any = None

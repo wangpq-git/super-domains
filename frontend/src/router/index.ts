@@ -46,6 +46,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Alerts.vue')
       },
       {
+        path: 'service-discovery',
+        name: 'ServiceDiscovery',
+        component: () => import('@/views/ServiceDiscovery.vue')
+      },
+      {
         path: 'system-settings',
         name: 'SystemSettings',
         component: () => import('@/views/SystemSettings.vue')
