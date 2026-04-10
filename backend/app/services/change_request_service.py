@@ -72,6 +72,7 @@ async def _get_change_request_for_update(db: AsyncSession, change_request_id: in
         select(ChangeRequest)
         .where(ChangeRequest.id == change_request_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
 

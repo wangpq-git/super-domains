@@ -346,6 +346,7 @@ async def handle_feishu_change_request_callback(
             return _build_feishu_noop_response()
 
         base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
+        approver_name = approver.display_name or approver.username
 
         try:
             if action == "approve":
@@ -355,8 +356,7 @@ async def handle_feishu_change_request_callback(
                     approver,
                     send_result_notification=False,
                 )
-                toast_message = f"审批通过，变更单 #{updated.request_no} 已执行"
-                result_note = f"已由 {approver.display_name or approver.username} 审批通过。"
+                result_note = f"已由 {approver_name} 审批通过。"
             elif action == "reject":
                 updated = await change_request_service.reject_change_request(
                     db,
@@ -365,9 +365,8 @@ async def handle_feishu_change_request_callback(
                     reason or "Rejected from Feishu callback",
                     send_result_notification=False,
                 )
-                toast_message = f"已拒绝变更单 #{updated.request_no}"
                 result_note = (
-                    f"已由 {approver.display_name or approver.username} 拒绝。"
+                    f"已由 {approver_name} 拒绝。"
                     f"{' 原因: ' + updated.rejection_reason if updated.rejection_reason else ''}"
                 )
             else:
