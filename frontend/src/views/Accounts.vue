@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>平台账户管理</span>
-          <div>
+          <div class="header-actions">
             <el-button :icon="Refresh" circle @click="handleRefresh" />
             <el-button type="success" :icon="Refresh" :loading="syncingAll" @click="handleSyncAll">一键同步所有</el-button>
             <el-button v-if="authStore.isAdmin" type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
@@ -12,18 +12,24 @@
         </div>
       </template>
 
-      <el-table v-loading="store.loading" :data="store.accounts" stripe style="width: 100%" @sort-change="handleSortChange">
-        <el-table-column prop="platform" label="平台" width="140" sortable="custom">
+      <el-table
+        v-loading="store.loading"
+        :data="store.accounts"
+        stripe
+        class="accounts-table"
+        @sort-change="handleSortChange"
+      >
+        <el-table-column prop="platform" label="平台" width="120" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="platformTagType(row.platform)" size="small">{{ platformLabel(row.platform) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="account_name" label="账户名称" min-width="180" show-overflow-tooltip sortable="custom" />
-        <el-table-column prop="domain_count" label="域名数量" width="110" align="center" />
-        <el-table-column prop="last_sync_at" label="最后同步" width="200" sortable="custom">
+        <el-table-column prop="account_name" label="账户名称" min-width="200" show-overflow-tooltip sortable="custom" />
+        <el-table-column prop="domain_count" label="域名数量" width="100" align="center" />
+        <el-table-column prop="last_sync_at" label="最后同步" min-width="180" sortable="custom">
           <template #default="{ row }">{{ row.last_sync_at ? formatDateTime(row.last_sync_at) : '从未同步' }}</template>
         </el-table-column>
-        <el-table-column prop="sync_status" label="同步状态" width="110" align="center">
+        <el-table-column prop="sync_status" label="同步状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.sync_status === 'success'" type="success" size="small">成功</el-tag>
             <el-tag v-else-if="row.sync_status === 'failed' || row.sync_status === 'error'" type="danger" size="small">失败</el-tag>
@@ -31,21 +37,23 @@
             <el-tag v-else type="info" size="small">未知</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" min-width="150" align="center">
           <template #default="{ row }">
-            <el-button v-if="authStore.isAdmin" size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
-            <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
-            <el-dropdown v-if="authStore.isAdmin" trigger="click">
-              <el-button size="small">
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item :icon="Edit" @click="openDialog(row)">编辑</el-dropdown-item>
-                  <el-dropdown-item :icon="Delete" divided @click="confirmDelete(row)">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div class="action-row">
+              <el-button v-if="authStore.isAdmin" size="small" class="action-btn" :icon="Connection" @click="handleTest(row)">测试</el-button>
+              <el-button size="small" type="primary" class="action-btn" :icon="Refresh" @click="handleSync(row)">同步</el-button>
+              <el-dropdown v-if="authStore.isAdmin" trigger="click">
+                <el-button size="small" class="action-btn action-more">
+                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :icon="Edit" @click="openDialog(row)">编辑</el-dropdown-item>
+                    <el-dropdown-item :icon="Delete" divided @click="confirmDelete(row)">删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -297,10 +305,22 @@ onMounted(() => {
 .accounts-container {
   width: 100%;
 }
+.accounts-table {
+  width: 100%;
+}
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .card-header span {
   font-size: 18px;
@@ -310,5 +330,22 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.action-btn {
+  padding: 5px 8px;
+}
+
+.action-more {
+  min-width: 58px;
 }
 </style>
