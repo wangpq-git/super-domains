@@ -857,8 +857,8 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
         if mapped is not None:
             if isinstance(mapped, int) or (isinstance(mapped, str) and str(mapped).isdigit()):
                 return await get_admin_user_by_id(db, int(mapped))
-            if isinstance(mapped, str):
-                query_values.setdefault("username", mapped)
+            if isinstance(mapped, str) and not query_values.get("username"):
+                query_values["username"] = mapped
 
     for field in ("username", "email", "display_name"):
         value = query_values.get(field)
