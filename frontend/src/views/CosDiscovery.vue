@@ -42,7 +42,7 @@
           <el-statistic title="存储桶数" :value="bucketCount" />
         </el-card>
         <el-card shadow="hover" class="stat-card">
-          <el-statistic title="当前页大小" :value="pageSize" />
+          <el-statistic title="筛选结果" :value="filteredDomainItems.length" />
         </el-card>
       </div>
 
@@ -51,10 +51,18 @@
           <div class="table-header">
             <div class="table-heading">
               <div class="table-title">COS 自定义域名列表</div>
-              <div class="table-subtitle">仅展示已配置自定义域名的 COS 存储桶。</div>
+              <div class="table-subtitle">支持按存储桶名、自定义域名或 CNAME 值快速筛选。</div>
             </div>
             <div class="table-tools">
-              <el-tag type="info">共 {{ domainItems.length }} 条</el-tag>
+              <el-input
+                v-model="keyword"
+                class="search-input"
+                clearable
+                placeholder="搜索存储桶名 / 域名 / CNAME"
+                @input="handleKeywordChange"
+                @clear="handleKeywordChange"
+              />
+              <el-tag type="info">共 {{ filteredDomainItems.length }} 条</el-tag>
               <el-select v-model="pageSize" class="page-size-select" @change="handlePageSizeChange">
                 <el-option
                   v-for="size in pageSizeOptions"
@@ -81,13 +89,13 @@
           <el-table-column prop="cname" label="CNAME 值" min-width="360" show-overflow-tooltip />
         </el-table>
 
-        <div v-if="domainItems.length" class="pagination-wrap">
+        <div v-if="filteredDomainItems.length" class="pagination-wrap">
           <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
             background
             layout="total, prev, pager, next, jumper"
-            :total="domainItems.length"
+            :total="filteredDomainItems.length"
           />
         </div>
       </el-card>
@@ -113,16 +121,31 @@ const configured = ref(false)
 const loadingConfig = ref(false)
 const loading = ref(false)
 const domainItems = ref<CosDiscoveryDomainItem[]>([])
+const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const pageSizeOptions = [10, 20, 50, 100]
 
 const domainCount = computed(() => domainItems.value.length)
 const bucketCount = computed(() => new Set(domainItems.value.map((item) => item.bucket_name)).size)
+const filteredDomainItems = computed(() => {
+  const query = keyword.value.trim().toLowerCase()
+  if (!query) {
+    return domainItems.value
+  }
+
+  return domainItems.value.filter((item) => {
+    return [item.bucket_name, item.custom_domain, item.cname].some((value) => value.toLowerCase().includes(query))
+  })
+})
 const pagedDomainItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return domainItems.value.slice(start, start + pageSize.value)
+  return filteredDomainItems.value.slice(start, start + pageSize.value)
 })
+
+function handleKeywordChange() {
+  currentPage.value = 1
+}
 
 function handlePageSizeChange() {
   currentPage.value = 1
@@ -135,6 +158,7 @@ async function loadConfig() {
     configured.value = data.configured
     if (!configured.value) {
       domainItems.value = []
+      keyword.value = ''
       currentPage.value = 1
     }
   } catch (error: any) {
@@ -149,9 +173,11 @@ async function loadDomains() {
   try {
     const { data } = await getCosDomains()
     domainItems.value = data.items || []
+    keyword.value = ''
     currentPage.value = 1
   } catch (error: any) {
     domainItems.value = []
+    keyword.value = ''
     currentPage.value = 1
     ElMessage.error(error.response?.data?.detail || '读取 COS 域名失败')
   } finally {
@@ -260,6 +286,10 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.search-input {
+  width: 320px;
+}
+
 .page-size-select {
   width: 110px;
 }
@@ -288,7 +318,11 @@ onMounted(async () => {
   }
 
   .toolbar-actions,
-  .table-tools,
+  .table-tools {
+    width: 100%;
+  }
+
+  .search-input,
   .page-size-select {
     width: 100%;
   }
