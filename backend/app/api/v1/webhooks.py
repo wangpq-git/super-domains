@@ -18,6 +18,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _build_feishu_noop_response() -> dict[str, Any]:
+    return {}
+
+
 def _nested_get(data: dict[str, Any], *path: str) -> Any:
     current: Any = data
     for key in path:
@@ -279,7 +283,7 @@ async def handle_feishu_change_request_callback(
         try:
             body = json.loads(raw_body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
-            return _build_feishu_error_response("无效的回调内容")
+            return _build_feishu_noop_response()
 
         challenge = body.get("challenge")
         if challenge:
@@ -318,16 +322,16 @@ async def handle_feishu_change_request_callback(
                 sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
                 callback,
             )
-            return _build_feishu_error_response("未识别到审批动作")
+            return _build_feishu_noop_response()
 
         try:
             request_id_int = int(request_id)
         except (TypeError, ValueError):
-            return _build_feishu_error_response("未识别到有效的变更单")
+            return _build_feishu_noop_response()
 
         change_request = await change_request_service.get_change_request_by_id(db, request_id_int)
         if not change_request:
-            return _build_feishu_error_response("变更单不存在或已失效")
+            return _build_feishu_noop_response()
 
         approver = await change_request_service.resolve_admin_user(
             db,
@@ -339,7 +343,7 @@ async def handle_feishu_change_request_callback(
                 callback["actor_identifiers"],
                 sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
             )
-            return _build_feishu_error_response("审批人未授权")
+            return _build_feishu_noop_response()
 
         base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
 
@@ -367,12 +371,12 @@ async def handle_feishu_change_request_callback(
                     f"{' 原因: ' + updated.rejection_reason if updated.rejection_reason else ''}"
                 )
             else:
-                return _build_feishu_error_response("暂不支持该审批动作")
+                return _build_feishu_noop_response()
         except ValueError:
             refreshed = await change_request_service.get_change_request_by_id(db, request_id_int)
             if refreshed and change_request_service.is_change_request_processed(refreshed):
-                return _build_idempotent_callback_response(refreshed, approver, base_url=base_url)
-            return _build_feishu_error_response("变更单状态已变化，请刷新后重试")
+                return _build_feishu_noop_response()
+            return _build_feishu_noop_response()
 
         updated_card = change_request_service.build_feishu_change_request_card(
             updated,
@@ -397,13 +401,10 @@ async def handle_feishu_change_request_callback(
         # The callback only needs to acknowledge the action with a toast.
         # We already patch the message via Feishu API above; omitting the inline
         # card payload avoids client-side callback rendering errors.
-        return _build_feishu_action_response(
-            toast_type="success",
-            toast_content=toast_message,
-        )
+        return _build_feishu_noop_response()
     except HTTPException as exc:
         logger.warning("Feishu callback handled with non-fatal error: %s", exc.detail)
-        return _build_feishu_error_response(str(exc.detail))
+        return _build_feishu_noop_response()
     except Exception:
         logger.exception("Unexpected Feishu callback error")
-        return _build_feishu_error_response("处理审批时出现异常，请稍后重试")
+        return _build_feishu_noop_response()
