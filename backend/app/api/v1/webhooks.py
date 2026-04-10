@@ -191,12 +191,6 @@ def _build_idempotent_callback_response(
     return _build_feishu_action_response(
         toast_type="info",
         toast_content=status_text_map.get(change_request.status, "该变更单已处理，无需重复操作"),
-        card=change_request_service.build_feishu_change_request_card(
-            change_request,
-            include_actions=False,
-            result_note=result_note_map.get(change_request.status, "该变更单已处理。"),
-            base_url=base_url,
-        ),
     )
 
 
@@ -400,12 +394,12 @@ async def handle_feishu_change_request_callback(
             if not updated_ok:
                 logger.warning("Failed to update Feishu message via API for request_id=%s", request_id_int)
 
-        # Always include the latest card in the callback response so Feishu updates
-        # the currently opened card in place and avoids client-side action errors.
+        # The callback only needs to acknowledge the action with a toast.
+        # We already patch the message via Feishu API above; omitting the inline
+        # card payload avoids client-side callback rendering errors.
         return _build_feishu_action_response(
             toast_type="success",
             toast_content=toast_message,
-            card=updated_card,
         )
     except HTTPException as exc:
         logger.warning("Feishu callback handled with non-fatal error: %s", exc.detail)
