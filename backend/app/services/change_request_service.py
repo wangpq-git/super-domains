@@ -583,6 +583,7 @@ async def _create_request(
         await _notify_change_request(db, change_request)
     except Exception:
         logger.exception("Failed to send change request notification for %s", change_request.request_no)
+    await db.refresh(change_request)
     return change_request
 
 
