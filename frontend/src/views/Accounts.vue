@@ -16,7 +16,6 @@
         v-loading="store.loading"
         :data="store.accounts"
         stripe
-        :fit="false"
         class="accounts-table"
         @sort-change="handleSortChange"
       >
