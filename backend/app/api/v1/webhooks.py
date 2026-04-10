@@ -221,6 +221,13 @@ def _build_feishu_action_response(
     return response
 
 
+def _build_feishu_error_response(message: str) -> dict[str, Any]:
+    return _build_feishu_action_response(
+        toast_type="error",
+        toast_content=message,
+    )
+
+
 async def _verify_signature(
     db: AsyncSession,
     raw_body: bytes,
@@ -272,131 +279,138 @@ async def handle_feishu_change_request_callback(
     x_lark_request_timestamp: str | None = Header(default=None),
     x_lark_request_nonce: str | None = Header(default=None),
 ):
-    raw_body = await request.body()
     try:
-        body = json.loads(raw_body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload")
+        raw_body = await request.body()
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return _build_feishu_error_response("无效的回调内容")
 
-    challenge = body.get("challenge")
-    if challenge:
-        return {"challenge": challenge}
+        challenge = body.get("challenge")
+        if challenge:
+            return {"challenge": challenge}
 
-    signature_valid = await _verify_signature(db, raw_body, x_lark_signature, x_lark_request_timestamp, x_lark_request_nonce)
+        signature_valid = await _verify_signature(db, raw_body, x_lark_signature, x_lark_request_timestamp, x_lark_request_nonce)
 
-    encrypt_key = await system_setting_service.get_string(db, "FEISHU_APPROVAL_ENCRYPT_KEY")
-    encrypted = body.get("encrypt")
-    if encrypted and encrypt_key:
-        body = _decrypt_feishu_payload(encrypted, encrypt_key)
+        encrypt_key = await system_setting_service.get_string(db, "FEISHU_APPROVAL_ENCRYPT_KEY")
+        encrypted = body.get("encrypt")
+        if encrypted and encrypt_key:
+            body = _decrypt_feishu_payload(encrypted, encrypt_key)
 
-    expected_token = await system_setting_service.get_string(db, "FEISHU_APPROVAL_CALLBACK_TOKEN")
-    callback_token = None
-    if expected_token:
-        callback_token = _extract_token(body, x_feishu_token)
-        # Real card callbacks may use an internal token value rather than the
-        # app-level callback token. Log the mismatch, but rely on decrypt/signature
-        # checks plus payload validation instead of hard-failing the action.
-        if callback_token is not None and callback_token != expected_token:
-            logger.warning("Feishu callback token mismatch: expected=%s actual=%s", expected_token, callback_token)
+        expected_token = await system_setting_service.get_string(db, "FEISHU_APPROVAL_CALLBACK_TOKEN")
+        callback_token = None
+        if expected_token:
+            callback_token = _extract_token(body, x_feishu_token)
+            # Real card callbacks may use an internal token value rather than the
+            # app-level callback token. Log the mismatch, but rely on decrypt/signature
+            # checks plus payload validation instead of hard-failing the action.
+            if callback_token is not None and callback_token != expected_token:
+                logger.warning("Feishu callback token mismatch: expected=%s actual=%s", expected_token, callback_token)
 
-    if not signature_valid:
-        logger.warning("Feishu callback signature fallback accepted after payload validation")
+        if not signature_valid:
+            logger.warning("Feishu callback signature fallback accepted after payload validation")
 
-    callback = _extract_callback_payload(body)
-    action = callback["action"]
-    request_id = callback["request_id"]
-    reason = callback["reason"]
-    callback_message_id = callback["message_id"]
+        callback = _extract_callback_payload(body)
+        action = callback["action"]
+        request_id = callback["request_id"]
+        reason = callback["reason"]
+        callback_message_id = callback["message_id"]
 
-    if not action or request_id is None:
-        logger.warning(
-            "Invalid Feishu callback payload: body_keys=%s event_keys=%s action_payload=%s",
-            sorted(body.keys()),
-            sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
-            callback,
-        )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid callback payload")
+        if not action or request_id is None:
+            logger.warning(
+                "Invalid Feishu callback payload: body_keys=%s event_keys=%s action_payload=%s",
+                sorted(body.keys()),
+                sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
+                callback,
+            )
+            return _build_feishu_error_response("未识别到审批动作")
 
-    try:
-        request_id_int = int(request_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid callback identifiers")
+        try:
+            request_id_int = int(request_id)
+        except (TypeError, ValueError):
+            return _build_feishu_error_response("未识别到有效的变更单")
 
-    change_request = await change_request_service.get_change_request_by_id(db, request_id_int)
-    if not change_request:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Change request not found")
+        change_request = await change_request_service.get_change_request_by_id(db, request_id_int)
+        if not change_request:
+            return _build_feishu_error_response("变更单不存在或已失效")
 
-    approver = await change_request_service.resolve_admin_user(
-        db,
-        callback["actor_identifiers"],
-    )
-    if not approver:
-        logger.warning(
-            "Unable to resolve Feishu approver: identifiers=%s body_event_keys=%s",
+        approver = await change_request_service.resolve_admin_user(
+            db,
             callback["actor_identifiers"],
-            sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
         )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approver is not an active admin")
-
-    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
-
-    try:
-        if action == "approve":
-            updated = await change_request_service.approve_change_request(
-                db,
-                change_request,
-                approver,
-                send_result_notification=False,
+        if not approver:
+            logger.warning(
+                "Unable to resolve Feishu approver: identifiers=%s body_event_keys=%s",
+                callback["actor_identifiers"],
+                sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
             )
-            toast_message = f"审批通过，变更单 #{updated.request_no} 已执行"
-            result_note = f"已由 {approver.display_name or approver.username} 审批通过。"
-        elif action == "reject":
-            updated = await change_request_service.reject_change_request(
-                db,
-                change_request,
-                approver,
-                reason or "Rejected from Feishu callback",
-                send_result_notification=False,
-            )
-            toast_message = f"已拒绝变更单 #{updated.request_no}"
-            result_note = (
-                f"已由 {approver.display_name or approver.username} 拒绝。"
-                f"{' 原因: ' + updated.rejection_reason if updated.rejection_reason else ''}"
-            )
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported callback action")
-    except ValueError as exc:
-        refreshed = await change_request_service.get_change_request_by_id(db, request_id_int)
-        if refreshed and change_request_service.is_change_request_processed(refreshed):
-            return _build_idempotent_callback_response(refreshed, approver, base_url=base_url)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+            return _build_feishu_error_response("审批人未授权")
 
-    updated_card = change_request_service.build_feishu_change_request_card(
-        updated,
-        include_actions=False,
-        result_note=result_note,
-        base_url=base_url,
-    )
-    app_id = await system_setting_service.get_string(db, "FEISHU_BOT_APP_ID")
-    app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
-    stored_message_id = change_request.payload.get("feishu_message_id") if isinstance(change_request.payload, dict) else None
-    message_id = callback_message_id or stored_message_id
-    if app_id and app_secret and message_id:
-        updated_ok = await notification_service.update_feishu_bot_interactive_message(
-            app_id=app_id,
-            app_secret=app_secret,
-            message_id=message_id,
+        base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
+
+        try:
+            if action == "approve":
+                updated = await change_request_service.approve_change_request(
+                    db,
+                    change_request,
+                    approver,
+                    send_result_notification=False,
+                )
+                toast_message = f"审批通过，变更单 #{updated.request_no} 已执行"
+                result_note = f"已由 {approver.display_name or approver.username} 审批通过。"
+            elif action == "reject":
+                updated = await change_request_service.reject_change_request(
+                    db,
+                    change_request,
+                    approver,
+                    reason or "Rejected from Feishu callback",
+                    send_result_notification=False,
+                )
+                toast_message = f"已拒绝变更单 #{updated.request_no}"
+                result_note = (
+                    f"已由 {approver.display_name or approver.username} 拒绝。"
+                    f"{' 原因: ' + updated.rejection_reason if updated.rejection_reason else ''}"
+                )
+            else:
+                return _build_feishu_error_response("暂不支持该审批动作")
+        except ValueError:
+            refreshed = await change_request_service.get_change_request_by_id(db, request_id_int)
+            if refreshed and change_request_service.is_change_request_processed(refreshed):
+                return _build_idempotent_callback_response(refreshed, approver, base_url=base_url)
+            return _build_feishu_error_response("变更单状态已变化，请刷新后重试")
+
+        updated_card = change_request_service.build_feishu_change_request_card(
+            updated,
+            include_actions=False,
+            result_note=result_note,
+            base_url=base_url,
+        )
+        app_id = await system_setting_service.get_string(db, "FEISHU_BOT_APP_ID")
+        app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
+        stored_message_id = change_request.payload.get("feishu_message_id") if isinstance(change_request.payload, dict) else None
+        message_id = callback_message_id or stored_message_id
+        if app_id and app_secret and message_id:
+            updated_ok = await notification_service.update_feishu_bot_interactive_message(
+                app_id=app_id,
+                app_secret=app_secret,
+                message_id=message_id,
+                card=updated_card,
+            )
+            if updated_ok:
+                return _build_feishu_action_response(
+                    toast_type="success",
+                    toast_content=toast_message,
+                )
+
+        logger.warning("Falling back to inline callback card update for request_id=%s", request_id_int)
+        return _build_feishu_action_response(
+            toast_type="success",
+            toast_content=toast_message,
             card=updated_card,
         )
-        if updated_ok:
-            return _build_feishu_action_response(
-                toast_type="success",
-                toast_content=toast_message,
-            )
-
-    logger.warning("Falling back to inline callback card update for request_id=%s", request_id_int)
-    return _build_feishu_action_response(
-        toast_type="success",
-        toast_content=toast_message,
-        card=updated_card,
-    )
+    except HTTPException as exc:
+        logger.warning("Feishu callback handled with non-fatal error: %s", exc.detail)
+        return _build_feishu_error_response(str(exc.detail))
+    except Exception:
+        logger.exception("Unexpected Feishu callback error")
+        return _build_feishu_error_response("处理审批时出现异常，请稍后重试")
