@@ -43,14 +43,17 @@ async def test_cos_discovery_domains_returns_cos_data(client, auth_headers, monk
         captured["secret_id"] = secret_id
         captured["secret_key"] = secret_key
         captured["timeout_seconds"] = timeout_seconds
-        return [
-            {
-                "bucket_name": "site-1250000000",
-                "custom_domain": "s3.example.com",
-                "origin_type": "静态网站源站",
-                "cname": "site-1250000000.cos-website.ap-singapore.myqcloud.com",
-            }
-        ]
+        return {
+            "items": [
+                {
+                    "bucket_name": "site-1250000000",
+                    "custom_domain": "s3.example.com",
+                    "origin_type": "静态网站源站",
+                    "cname": "site-1250000000.cos-website.ap-singapore.myqcloud.com",
+                }
+            ],
+            "skipped_bucket_count": 2,
+        }
 
     monkeypatch.setattr(cos_discovery_service, "_list_cos_domains_sync", fake_list_cos_domains_sync)
 
@@ -70,7 +73,8 @@ async def test_cos_discovery_domains_returns_cos_data(client, auth_headers, monk
                 "origin_type": "静态网站源站",
                 "cname": "site-1250000000.cos-website.ap-singapore.myqcloud.com",
             }
-        ]
+        ],
+        "skipped_bucket_count": 2,
     }
 
 
@@ -80,3 +84,105 @@ async def test_cos_discovery_domains_requires_credentials(client, auth_headers):
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "请先在配置中心填写腾讯云 SecretId 和 SecretKey"
+
+
+def test_list_cos_domains_sync_keeps_bucket_when_domain_is_not_configured(monkeypatch):
+    class FakeClient:
+        def __init__(self, config):
+            self.region = getattr(config, "_region", None)
+
+        def list_buckets(self):
+            return {
+                "Buckets": {
+                    "Bucket": [
+                        {"Name": "empty-bucket", "Location": "ap-singapore"},
+                        {"Name": "allowed-bucket", "Location": "ap-singapore"},
+                    ]
+                }
+            }
+
+        def get_bucket_domain(self, Bucket):
+            if Bucket == "empty-bucket":
+                raise Exception("{'code': 'DomainConfigNotFoundError', 'message': 'Bucket domain config not found.'}")
+            return {"DomainRule": [{"Name": "s3.example.com", "Type": "WEBSITE"}]}
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self._region = kwargs.get("Region")
+
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules,
+        "qcloud_cos",
+        types.SimpleNamespace(CosConfig=FakeConfig, CosS3Client=FakeClient),
+    )
+
+    result = cos_discovery_service._list_cos_domains_sync("sid", "skey", 10)
+
+    assert result == {
+        "items": [
+            {
+                "bucket_name": "allowed-bucket",
+                "custom_domain": "s3.example.com",
+                "origin_type": "静态网站源站",
+                "cname": "allowed-bucket.cos-website.ap-singapore.myqcloud.com",
+            },
+            {
+                "bucket_name": "empty-bucket",
+                "custom_domain": "",
+                "origin_type": "",
+                "cname": "",
+            },
+        ],
+        "skipped_bucket_count": 0,
+    }
+
+
+def test_list_cos_domains_sync_skips_denied_bucket(monkeypatch):
+    class FakeClient:
+        def __init__(self, config):
+            self.region = getattr(config, "_region", None)
+
+        def list_buckets(self):
+            return {
+                "Buckets": {
+                    "Bucket": [
+                        {"Name": "denied-bucket", "Location": "ap-singapore"},
+                        {"Name": "allowed-bucket", "Location": "ap-singapore"},
+                    ]
+                }
+            }
+
+        def get_bucket_domain(self, Bucket):
+            if Bucket == "denied-bucket":
+                raise Exception("{'code': 'AccessDenied', 'message': 'Access Denied.'}")
+            return {"DomainRule": [{"Name": "s3.example.com", "Type": "WEBSITE"}]}
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self._region = kwargs.get("Region")
+
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules,
+        "qcloud_cos",
+        types.SimpleNamespace(CosConfig=FakeConfig, CosS3Client=FakeClient),
+    )
+
+    result = cos_discovery_service._list_cos_domains_sync("sid", "skey", 10)
+
+    assert result == {
+        "items": [
+            {
+                "bucket_name": "allowed-bucket",
+                "custom_domain": "s3.example.com",
+                "origin_type": "静态网站源站",
+                "cname": "allowed-bucket.cos-website.ap-singapore.myqcloud.com",
+            }
+        ],
+        "skipped_bucket_count": 1,
+    }

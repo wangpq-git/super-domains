@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import system_setting_service
 
 _SERVICE_REGION = "ap-beijing"
+_ACCESS_DENIED_FLAGS = ["AccessDenied", "Access Denied"]
+_DOMAIN_NOT_FOUND_FLAGS = ["DomainConfigNotFoundError", "Bucket domain config not found"]
 
 
 def _ensure_list(value: Any) -> list[Any]:
@@ -34,7 +36,24 @@ def _build_cname(bucket_name: str, region: str, domain_type: str) -> str:
     return f"{bucket_name}.cos.{region}.myqcloud.com"
 
 
-def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int) -> list[dict[str, str]]:
+def _is_access_denied(message: str) -> bool:
+    return any(flag in message for flag in _ACCESS_DENIED_FLAGS)
+
+
+def _is_domain_not_found(message: str) -> bool:
+    return any(flag in message for flag in _DOMAIN_NOT_FOUND_FLAGS)
+
+
+def _empty_domain_item(bucket_name: str) -> dict[str, str]:
+    return {
+        "bucket_name": bucket_name,
+        "custom_domain": "",
+        "origin_type": "",
+        "cname": "",
+    }
+
+
+def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int) -> dict[str, Any]:
     try:
         from qcloud_cos import CosConfig, CosS3Client
     except ImportError as exc:
@@ -55,6 +74,7 @@ def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int
 
     buckets = _ensure_list(((service_response or {}).get("Buckets") or {}).get("Bucket"))
     items: list[dict[str, str]] = []
+    skipped_bucket_count = 0
 
     for bucket in buckets:
         if not isinstance(bucket, dict):
@@ -75,14 +95,24 @@ def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int
             )
             domain_response = bucket_client.get_bucket_domain(Bucket=bucket_name)
         except Exception as exc:  # pragma: no cover
+            message = str(exc)
+            if _is_access_denied(message):
+                skipped_bucket_count += 1
+                continue
+            if _is_domain_not_found(message):
+                items.append(_empty_domain_item(bucket_name))
+                continue
             raise RuntimeError(f"读取存储桶 {bucket_name} 的自定义域名失败: {exc}") from exc
 
-        for rule in _ensure_list((domain_response or {}).get("DomainRule")):
+        rules = _ensure_list((domain_response or {}).get("DomainRule"))
+        matched_rule = False
+        for rule in rules:
             if not isinstance(rule, dict):
                 continue
             custom_domain = str(rule.get("Name") or "").strip()
             if not custom_domain:
                 continue
+            matched_rule = True
             domain_type = str(rule.get("Type") or "REST").strip().upper() or "REST"
             items.append(
                 {
@@ -93,8 +123,11 @@ def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int
                 }
             )
 
+        if not matched_rule:
+            items.append(_empty_domain_item(bucket_name))
+
     items.sort(key=lambda item: (item["bucket_name"], item["custom_domain"]))
-    return items
+    return {"items": items, "skipped_bucket_count": skipped_bucket_count}
 
 
 async def get_cos_discovery_config(db: AsyncSession) -> dict[str, bool]:
@@ -110,5 +143,4 @@ async def list_cos_domains(db: AsyncSession) -> dict[str, Any]:
         raise ValueError("请先在配置中心填写腾讯云 SecretId 和 SecretKey")
 
     timeout_seconds = await system_setting_service.get_int(db, "TENCENT_COS_REQUEST_TIMEOUT_SECONDS")
-    items = await asyncio.to_thread(_list_cos_domains_sync, secret_id, secret_key, timeout_seconds)
-    return {"items": items}
+    return await asyncio.to_thread(_list_cos_domains_sync, secret_id, secret_key, timeout_seconds)
