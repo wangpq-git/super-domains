@@ -31,13 +31,13 @@
             <el-tag v-else type="info" size="small">未知</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right" align="center">
           <template #default="{ row }">
             <div class="action-row">
-              <el-button v-if="authStore.isAdmin" size="small" :icon="Connection" @click="handleTest(row)">测试</el-button>
-              <el-button size="small" type="primary" :icon="Refresh" @click="handleSync(row)">同步</el-button>
+              <el-button v-if="authStore.isAdmin" size="small" class="action-btn" :icon="Connection" @click="handleTest(row)">测试</el-button>
+              <el-button size="small" type="primary" class="action-btn" :icon="Refresh" @click="handleSync(row)">同步</el-button>
               <el-dropdown v-if="authStore.isAdmin" trigger="click">
-                <el-button size="small">
+                <el-button size="small" class="action-btn action-more">
                   更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
                 </el-button>
                 <template #dropdown>
@@ -317,9 +317,17 @@ onMounted(() => {
 .action-row {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   flex-wrap: nowrap;
   white-space: nowrap;
+}
+
+.action-btn {
+  padding: 6px 10px;
+}
+
+.action-more {
+  min-width: 58px;
 }
 </style>

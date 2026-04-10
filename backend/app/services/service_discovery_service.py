@@ -135,7 +135,7 @@ async def list_ingresses(db: AsyncSession, namespace: str | None = None) -> dict
     cache_ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
     cache_key = data_cache_service.build_cache_key(
         "service_discovery_ingresses",
-        namespace=resolved_namespace,
+        target_namespace=resolved_namespace,
         timeout_seconds=timeout_seconds,
     )
 
