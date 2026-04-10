@@ -44,6 +44,10 @@
           <el-icon><Share /></el-icon>
           <template #title>服务解析</template>
         </el-menu-item>
+        <el-menu-item index="/cos-discovery">
+          <el-icon><Files /></el-icon>
+          <template #title>COS解析</template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.isAdmin" index="/system-settings">
           <el-icon><Tools /></el-icon>
           <template #title>系统配置</template>
@@ -140,6 +144,7 @@ const titleMap: Record<string, string> = {
   '/change-requests': '审批中心',
   '/alerts': '告警规则',
   '/service-discovery': '服务解析',
+  '/cos-discovery': 'COS解析',
   '/system-settings': '系统配置',
   '/users': '用户管理',
 }

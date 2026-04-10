@@ -13,6 +13,7 @@ from app.api.v1.reports import router as reports_router
 from app.api.v1.users import router as users_router
 from app.api.v1.system_settings import router as system_settings_router
 from app.api.v1.service_discovery import router as service_discovery_router
+from app.api.v1.cos_discovery import router as cos_discovery_router
 from app.api.v1.webhooks import router as webhooks_router
 
 api_router = APIRouter()
@@ -29,6 +30,7 @@ api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(system_settings_router, prefix="/system-settings", tags=["system-settings"])
 api_router.include_router(service_discovery_router, prefix="/service-discovery", tags=["service-discovery"])
+api_router.include_router(cos_discovery_router, prefix="/cos-discovery", tags=["cos-discovery"])
 api_router.include_router(webhooks_router, prefix="/webhooks", tags=["webhooks"])
 
 
