@@ -6,8 +6,10 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
 from app.core.config import settings
+from app.models.change_request import ChangeRequest
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
 from app.services import dns_service
@@ -942,6 +944,194 @@ async def test_feishu_callback_updates_card_without_sending_extra_result_notific
     assert callback_resp.json()["toast"]["type"] == "success"
     assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
     assert len(sent_payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_feishu_callback_returns_updated_card_even_when_bot_message_update_succeeds(
+    client,
+    async_session,
+    auth_headers,
+    monkeypatch,
+):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="callback-inline-update.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    update_calls = []
+
+    async def fake_create_dns_record(db, domain_id, data):
+        return SimpleNamespace(id=1004)
+
+    async def fake_update_message(**kwargs):
+        update_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(dns_service, "create_dns_record", fake_create_dns_record)
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
+    monkeypatch.setattr(settings, "FEISHU_BOT_APP_ID", "app-id")
+    monkeypatch.setattr(settings, "FEISHU_BOT_APP_SECRET", "app-secret")
+    monkeypatch.setattr(
+        "app.services.notification_service.update_feishu_bot_interactive_message",
+        fake_update_message,
+    )
+
+    create_resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "api",
+            "content": "5.5.5.5",
+            "ttl": 120,
+        },
+    )
+    request_id = create_resp.json()["id"]
+
+    result = await async_session.execute(select(ChangeRequest).where(ChangeRequest.id == request_id))
+    change_request = result.scalar_one()
+    change_request.payload = {
+        **(change_request.payload or {}),
+        "feishu_message_id": "om_stored_message_id",
+    }
+    await async_session.commit()
+
+    callback_resp = await client.post(
+        "/api/v1/webhooks/feishu/change-requests",
+        headers={"X-Feishu-Token": "token-123"},
+        json={
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "token-123",
+            },
+            "event": {
+                "context": {
+                    "open_message_id": "om_callback_message_id",
+                },
+                "operator": {
+                    "username": "testadmin",
+                },
+                "action": {
+                    "value": {
+                        "action": "approve",
+                        "request_id": str(request_id),
+                    }
+                },
+            },
+        },
+    )
+
+    assert callback_resp.status_code == 200
+    assert callback_resp.json()["toast"]["type"] == "success"
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert len(update_calls) == 1
+    assert update_calls[0]["message_id"] == "om_stored_message_id"
+
+
+@pytest.mark.asyncio
+async def test_feishu_reject_callback_returns_updated_card_when_bot_message_update_succeeds(
+    client,
+    async_session,
+    auth_headers,
+    monkeypatch,
+):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="callback-inline-reject.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    update_calls = []
+
+    async def fake_update_message(**kwargs):
+        update_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
+    monkeypatch.setattr(settings, "FEISHU_BOT_APP_ID", "app-id")
+    monkeypatch.setattr(settings, "FEISHU_BOT_APP_SECRET", "app-secret")
+    monkeypatch.setattr(
+        "app.services.notification_service.update_feishu_bot_interactive_message",
+        fake_update_message,
+    )
+
+    create_resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "api",
+            "content": "8.8.8.8",
+            "ttl": 120,
+        },
+    )
+    request_id = create_resp.json()["id"]
+
+    result = await async_session.execute(select(ChangeRequest).where(ChangeRequest.id == request_id))
+    change_request = result.scalar_one()
+    change_request.payload = {
+        **(change_request.payload or {}),
+        "feishu_message_id": "om_reject_message_id",
+    }
+    await async_session.commit()
+
+    callback_resp = await client.post(
+        "/api/v1/webhooks/feishu/change-requests",
+        headers={"X-Feishu-Token": "token-123"},
+        json={
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "token-123",
+            },
+            "event": {
+                "operator": {
+                    "username": "testadmin",
+                },
+                "action": {
+                    "value": {
+                        "action": "reject",
+                        "request_id": str(request_id),
+                        "reason": "manual reject",
+                    }
+                },
+            },
+        },
+    )
+
+    assert callback_resp.status_code == 200
+    assert callback_resp.json()["toast"]["type"] == "success"
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert len(update_calls) == 1
+    assert "拒绝" in json.dumps(callback_resp.json()["card"], ensure_ascii=False)
 
 
 @pytest.mark.asyncio

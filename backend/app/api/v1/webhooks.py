@@ -388,7 +388,7 @@ async def handle_feishu_change_request_callback(
         app_id = await system_setting_service.get_string(db, "FEISHU_BOT_APP_ID")
         app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
         stored_message_id = change_request.payload.get("feishu_message_id") if isinstance(change_request.payload, dict) else None
-        message_id = callback_message_id or stored_message_id
+        message_id = stored_message_id or callback_message_id
         if app_id and app_secret and message_id:
             updated_ok = await notification_service.update_feishu_bot_interactive_message(
                 app_id=app_id,
@@ -396,13 +396,11 @@ async def handle_feishu_change_request_callback(
                 message_id=message_id,
                 card=updated_card,
             )
-            if updated_ok:
-                return _build_feishu_action_response(
-                    toast_type="success",
-                    toast_content=toast_message,
-                )
+            if not updated_ok:
+                logger.warning("Failed to update Feishu message via API for request_id=%s", request_id_int)
 
-        logger.warning("Falling back to inline callback card update for request_id=%s", request_id_int)
+        # Always include the latest card in the callback response so Feishu updates
+        # the currently opened card in place and avoids client-side action errors.
         return _build_feishu_action_response(
             toast_type="success",
             toast_content=toast_message,
