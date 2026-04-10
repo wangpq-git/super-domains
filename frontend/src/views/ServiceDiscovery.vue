@@ -1,17 +1,13 @@
 <template>
   <div class="service-discovery-container">
-    <el-alert
-      title="从配置中心读取 K8s kubeconfig 和允许访问的命名空间，展示指定 namespace 下的 Ingress 名称与域名。"
-      type="info"
-      :closable="false"
-      class="page-tip"
-    />
-
     <el-card shadow="never" class="toolbar-card">
       <div class="toolbar">
-        <div>
+        <div class="toolbar-copy">
           <div class="page-title">服务解析</div>
-          <div class="page-subtitle">查看已配置命名空间中的 Ingress 域名映射。</div>
+          <div class="page-subtitle">查看已配置命名空间中的 Ingress 域名与 LB 地址映射。</div>
+          <div class="page-description">
+            数据来自配置中心中预设的 K8s kubeconfig 与命名空间白名单。
+          </div>
         </div>
 
         <div class="toolbar-actions">
@@ -63,16 +59,27 @@
         </el-card>
       </div>
 
-      <el-card shadow="never">
+      <el-card shadow="never" class="table-card">
         <template #header>
           <div class="table-header">
-            <div>
-              <div class="table-title">Ingress 列表</div>
-              <div class="table-subtitle">当前命名空间：{{ currentNamespaceLabel }}</div>
+            <div class="table-heading">
+              <div class="table-title-row">
+                <div class="table-title">Ingress 列表</div>
+                <el-tag effect="plain" type="success">当前命名空间：{{ currentNamespaceLabel }}</el-tag>
+              </div>
+              <div class="table-subtitle">支持按 Ingress 名称、域名或 LB 地址快速筛选。</div>
             </div>
-            <div class="table-meta">
-              <el-tag type="info">共 {{ ingressItems.length }} 条</el-tag>
-              <el-select v-model="pageSize" class="page-size-select">
+            <div class="table-tools">
+              <el-input
+                v-model="keyword"
+                class="search-input"
+                clearable
+                placeholder="搜索 Ingress / 域名 / LB 地址"
+                @input="handleKeywordChange"
+                @clear="handleKeywordChange"
+              />
+              <el-tag type="info">共 {{ filteredIngressItems.length }} 条</el-tag>
+              <el-select v-model="pageSize" class="page-size-select" @change="handlePageSizeChange">
                 <el-option
                   v-for="size in pageSizeOptions"
                   :key="size"
@@ -84,9 +91,16 @@
           </div>
         </template>
 
-        <el-table v-loading="loading" :data="pagedIngressItems" empty-text="暂无 Ingress 数据" border>
-          <el-table-column prop="name" label="Ingress 名称" min-width="180" />
-          <el-table-column label="域名" min-width="280">
+        <el-table
+          v-loading="loading"
+          :data="pagedIngressItems"
+          empty-text="暂无 Ingress 数据"
+          border
+          stripe
+          class="ingress-table"
+        >
+          <el-table-column prop="name" label="Ingress 名称" min-width="220" show-overflow-tooltip />
+          <el-table-column label="域名" min-width="320">
             <template #default="{ row }">
               <div class="tag-list">
                 <el-tag v-for="host in row.hosts" :key="host" class="host-tag" type="success">
@@ -96,22 +110,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="TLS 域名" min-width="220">
-            <template #default="{ row }">
-              <div class="tag-list">
-                <el-tag v-for="host in row.tls_hosts" :key="host" class="host-tag" type="warning">
-                  {{ host }}
-                </el-tag>
-                <span v-if="!row.tls_hosts.length" class="placeholder-text">-</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="ingress_class_name" label="Ingress Class" min-width="140">
-            <template #default="{ row }">
-              {{ row.ingress_class_name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="LB 地址" min-width="220">
+          <el-table-column label="LB 地址" min-width="320">
             <template #default="{ row }">
               <div class="tag-list">
                 <el-tag v-for="item in row.load_balancers" :key="item" class="host-tag" type="info">
@@ -123,13 +122,13 @@
           </el-table-column>
         </el-table>
 
-        <div v-if="ingressItems.length" class="pagination-wrap">
+        <div v-if="filteredIngressItems.length" class="pagination-wrap">
           <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
             background
             layout="total, prev, pager, next, jumper"
-            :total="ingressItems.length"
+            :total="filteredIngressItems.length"
           />
         </div>
       </el-card>
@@ -158,20 +157,41 @@ const loading = ref(false)
 const namespaceOptions = ref<ServiceDiscoveryNamespaceOption[]>([])
 const selectedNamespace = ref('')
 const ingressItems = ref<ServiceDiscoveryIngressItem[]>([])
+const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const pageSizeOptions = [10, 20, 50, 100]
 
 const ingressCount = computed(() => ingressItems.value.length)
 const hostCount = computed(() => ingressItems.value.reduce((sum, item) => sum + item.hosts.length, 0))
+const filteredIngressItems = computed(() => {
+  const query = keyword.value.trim().toLowerCase()
+  if (!query) {
+    return ingressItems.value
+  }
+
+  return ingressItems.value.filter((item) => {
+    return [item.name, ...item.hosts, ...item.load_balancers].some((value) => {
+      return value.toLowerCase().includes(query)
+    })
+  })
+})
 const pagedIngressItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return ingressItems.value.slice(start, start + pageSize.value)
+  return filteredIngressItems.value.slice(start, start + pageSize.value)
 })
 const currentNamespaceLabel = computed(() => {
   const matched = namespaceOptions.value.find((item) => item.namespace === selectedNamespace.value)
   return matched?.label || selectedNamespace.value || '-'
 })
+
+function handleKeywordChange() {
+  currentPage.value = 1
+}
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
 
 async function loadConfig() {
   loadingConfig.value = true
@@ -183,6 +203,7 @@ async function loadConfig() {
     if (!namespaceOptions.value.length) {
       selectedNamespace.value = ''
       ingressItems.value = []
+      keyword.value = ''
       currentPage.value = 1
       return
     }
@@ -208,9 +229,11 @@ async function loadIngresses() {
   try {
     const { data } = await getServiceIngresses(selectedNamespace.value)
     ingressItems.value = data.items || []
+    keyword.value = ''
     currentPage.value = 1
   } catch (error: any) {
     ingressItems.value = []
+    keyword.value = ''
     currentPage.value = 1
     ElMessage.error(error.response?.data?.detail || '读取 Ingress 失败')
   } finally {
@@ -232,31 +255,41 @@ onMounted(async () => {
   padding-bottom: 20px;
 }
 
-.page-tip {
-  margin-bottom: 16px;
-}
-
 .toolbar-card {
   margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
 }
 
 .toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: wrap;
 }
 
+.toolbar-copy {
+  max-width: 560px;
+}
+
 .page-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
-  color: #1f2937;
+  color: #111827;
 }
 
 .page-subtitle {
   margin-top: 6px;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.page-description {
+  margin-top: 10px;
   color: #6b7280;
+  line-height: 1.6;
 }
 
 .toolbar-actions {
@@ -281,17 +314,41 @@ onMounted(async () => {
   border-radius: 14px;
 }
 
-.table-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+.table-card {
+  border-radius: 18px;
 }
 
-.table-meta {
+.table-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.table-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.table-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.table-tools {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.search-input {
+  width: 320px;
 }
 
 .page-size-select {
@@ -304,9 +361,17 @@ onMounted(async () => {
 }
 
 .table-subtitle {
-  margin-top: 4px;
   font-size: 13px;
   color: #6b7280;
+}
+
+.ingress-table :deep(.el-table__header th) {
+  background: #f8fafc;
+  color: #374151;
+}
+
+.ingress-table :deep(.el-table__cell) {
+  vertical-align: top;
 }
 
 .tag-list {
@@ -349,14 +414,14 @@ onMounted(async () => {
     width: 100%;
   }
 
-  .table-header {
-    align-items: flex-start;
-    flex-direction: column;
+  .table-tools {
+    width: 100%;
+    justify-content: flex-start;
   }
 
-  .table-meta {
+  .search-input,
+  .page-size-select {
     width: 100%;
-    justify-content: space-between;
   }
 
   .pagination-wrap {
