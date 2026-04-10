@@ -93,37 +93,37 @@
             <template #default="{ row }">
               <div class="stack-cell">
                 <div
-                  v-for="(item, index) in row.domain_entries"
+                  v-for="(domain, index) in row.custom_domains"
                   :key="`${row.bucket_name}-domain-${index}`"
                   class="stack-line"
                 >
-                  {{ item.custom_domain || '-' }}
+                  {{ domain }}
                 </div>
               </div>
             </template>
           </el-table-column>
           <el-table-column label="源站类型" min-width="160">
             <template #default="{ row }">
-              <div class="stack-cell">
+              <div class="stack-cell stack-compact">
                 <div
-                  v-for="(item, index) in row.domain_entries"
+                  v-for="(originType, index) in (row.origin_types.length ? row.origin_types : ['-'])"
                   :key="`${row.bucket_name}-origin-${index}`"
                   class="stack-line"
                 >
-                  {{ item.origin_type || '-' }}
+                  {{ originType }}
                 </div>
               </div>
             </template>
           </el-table-column>
           <el-table-column label="CNAME 值" min-width="380">
             <template #default="{ row }">
-              <div class="stack-cell">
+              <div class="stack-cell stack-compact">
                 <div
-                  v-for="(item, index) in row.domain_entries"
+                  v-for="(cname, index) in (row.cnames.length ? row.cnames : ['-'])"
                   :key="`${row.bucket_name}-cname-${index}`"
                   class="stack-line stack-code"
                 >
-                  {{ item.cname || '-' }}
+                  {{ cname }}
                 </div>
               </div>
             </template>
@@ -157,7 +157,9 @@ import {
 
 interface CosBucketRow {
   bucket_name: string
-  domain_entries: CosDiscoveryDomainItem[]
+  custom_domains: string[]
+  origin_types: string[]
+  cnames: string[]
   search_text: string
 }
 
@@ -185,16 +187,30 @@ const groupedBucketRows = computed<CosBucketRow[]>(() => {
   })
 
   return Array.from(bucketMap.entries())
-    .map(([bucket_name, domain_entries]) => ({
-      bucket_name,
-      domain_entries,
-      search_text: [
+    .map(([bucket_name, domain_entries]) => {
+      const custom_domains = domain_entries.map((item) => item.custom_domain || '-')
+      const origin_types = Array.from(
+        new Set(domain_entries.map((item) => item.origin_type).filter((value) => value))
+      )
+      const cnames = Array.from(
+        new Set(domain_entries.map((item) => item.cname).filter((value) => value))
+      )
+
+      return {
         bucket_name,
-        ...domain_entries.flatMap((item) => [item.custom_domain, item.origin_type, item.cname]),
-      ]
-        .join(' ')
-        .toLowerCase(),
-    }))
+        custom_domains,
+        origin_types,
+        cnames,
+        search_text: [
+          bucket_name,
+          ...custom_domains,
+          ...origin_types,
+          ...cnames,
+        ]
+          .join(' ')
+          .toLowerCase(),
+      }
+    })
     .sort((a, b) => a.bucket_name.localeCompare(b.bucket_name))
 })
 const bucketCount = computed(() => groupedBucketRows.value.length)
@@ -396,6 +412,10 @@ onMounted(async () => {
 
 .stack-code {
   color: #4b5563;
+}
+
+.stack-compact {
+  gap: 4px;
 }
 
 .empty-state {
