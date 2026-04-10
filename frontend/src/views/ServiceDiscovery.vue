@@ -70,11 +70,21 @@
               <div class="table-title">Ingress 列表</div>
               <div class="table-subtitle">当前命名空间：{{ currentNamespaceLabel }}</div>
             </div>
-            <el-tag type="info">共 {{ ingressItems.length }} 条</el-tag>
+            <div class="table-meta">
+              <el-tag type="info">共 {{ ingressItems.length }} 条</el-tag>
+              <el-select v-model="pageSize" class="page-size-select">
+                <el-option
+                  v-for="size in pageSizeOptions"
+                  :key="size"
+                  :label="`${size} / 页`"
+                  :value="size"
+                />
+              </el-select>
+            </div>
           </div>
         </template>
 
-        <el-table v-loading="loading" :data="ingressItems" empty-text="暂无 Ingress 数据" border>
+        <el-table v-loading="loading" :data="pagedIngressItems" empty-text="暂无 Ingress 数据" border>
           <el-table-column prop="name" label="Ingress 名称" min-width="180" />
           <el-table-column label="域名" min-width="280">
             <template #default="{ row }">
@@ -112,6 +122,16 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="ingressItems.length" class="pagination-wrap">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            background
+            layout="total, prev, pager, next, jumper"
+            :total="ingressItems.length"
+          />
+        </div>
       </el-card>
     </template>
   </div>
@@ -138,9 +158,16 @@ const loading = ref(false)
 const namespaceOptions = ref<ServiceDiscoveryNamespaceOption[]>([])
 const selectedNamespace = ref('')
 const ingressItems = ref<ServiceDiscoveryIngressItem[]>([])
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pageSizeOptions = [10, 20, 50, 100]
 
 const ingressCount = computed(() => ingressItems.value.length)
 const hostCount = computed(() => ingressItems.value.reduce((sum, item) => sum + item.hosts.length, 0))
+const pagedIngressItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return ingressItems.value.slice(start, start + pageSize.value)
+})
 const currentNamespaceLabel = computed(() => {
   const matched = namespaceOptions.value.find((item) => item.namespace === selectedNamespace.value)
   return matched?.label || selectedNamespace.value || '-'
@@ -156,6 +183,7 @@ async function loadConfig() {
     if (!namespaceOptions.value.length) {
       selectedNamespace.value = ''
       ingressItems.value = []
+      currentPage.value = 1
       return
     }
 
@@ -180,8 +208,10 @@ async function loadIngresses() {
   try {
     const { data } = await getServiceIngresses(selectedNamespace.value)
     ingressItems.value = data.items || []
+    currentPage.value = 1
   } catch (error: any) {
     ingressItems.value = []
+    currentPage.value = 1
     ElMessage.error(error.response?.data?.detail || '读取 Ingress 失败')
   } finally {
     loading.value = false
@@ -258,6 +288,16 @@ onMounted(async () => {
   gap: 16px;
 }
 
+.table-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-size-select {
+  width: 110px;
+}
+
 .table-title {
   font-size: 16px;
   font-weight: 600;
@@ -290,6 +330,12 @@ onMounted(async () => {
   border-radius: 12px;
 }
 
+.pagination-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 @media (max-width: 900px) {
   .stats-grid {
     grid-template-columns: 1fr;
@@ -301,6 +347,20 @@ onMounted(async () => {
 
   .toolbar-actions {
     width: 100%;
+  }
+
+  .table-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .pagination-wrap {
+    justify-content: center;
   }
 }
 </style>
