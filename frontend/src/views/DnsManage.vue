@@ -26,6 +26,9 @@
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-tag type="warning" effect="light">当前仅支持修改 Cloudflare 域名</el-tag>
+        </el-form-item>
+        <el-form-item>
           <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords" />
           <el-button type="primary" :icon="Refresh" :loading="syncing" :disabled="!selectedDomainId" @click="handleSync">同步记录</el-button>
           <el-button v-if="authStore.isAdmin" type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
@@ -176,6 +179,7 @@ async function fetchDomains(search?: string) {
       page_size: 50,
       exclude_expired: true,
       dns_manageable_only: true,
+      platform: 'cloudflare',
     }
     if (search) params.search = search
     const { data } = await getDomains(params)

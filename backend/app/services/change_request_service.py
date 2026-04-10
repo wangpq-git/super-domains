@@ -45,9 +45,16 @@ TERMINAL_STATUSES = {
     STATUS_CANCELLED,
 }
 
+CLOUDFLARE_PLATFORM = "cloudflare"
+CLOUDFLARE_ONLY_CHANGE_MESSAGE = "目前仅支持修改 Cloudflare 平台上的域名"
+
 
 async def _get_domain(db: AsyncSession, domain_id: int) -> Domain | None:
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .where(Domain.id == domain_id)
+    )
     return result.scalar_one_or_none()
 
 
@@ -58,6 +65,23 @@ async def _get_dns_record(db: AsyncSession, record_id: int) -> DnsRecord | None:
         .where(DnsRecord.id == record_id)
     )
     return result.scalar_one_or_none()
+
+
+def _domain_platform(domain: Domain | None) -> str:
+    if not domain or not domain.account or not domain.account.platform:
+        return ""
+    return str(domain.account.platform).lower()
+
+
+def _ensure_domain_change_supported(domain: Domain | None) -> None:
+    if _domain_platform(domain) != CLOUDFLARE_PLATFORM:
+        raise ValueError(CLOUDFLARE_ONLY_CHANGE_MESSAGE)
+
+
+def _ensure_domains_change_supported(domains: list[Domain]) -> None:
+    unsupported = [domain.domain_name for domain in domains if _domain_platform(domain) != CLOUDFLARE_PLATFORM]
+    if unsupported:
+        raise ValueError(f"{CLOUDFLARE_ONLY_CHANGE_MESSAGE}: {', '.join(unsupported[:3])}")
 
 
 async def _add_event(
@@ -370,6 +394,7 @@ async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int
     domain = await _get_domain(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
+    _ensure_domain_change_supported(domain)
     record = await dns_service.create_dns_record(db, domain_id, data)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -404,6 +429,7 @@ async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int
     if not existing:
         raise ValueError(f"DNS record {record_id} not found")
     domain = await _get_domain(db, existing.domain_id)
+    _ensure_domain_change_supported(domain)
     record = await dns_service.update_dns_record(db, record_id, data)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -442,6 +468,7 @@ async def execute_dns_delete_direct(db: AsyncSession, user: User, record_id: int
     if not existing:
         raise ValueError(f"DNS record {record_id} not found")
     domain = await _get_domain(db, existing.domain_id)
+    _ensure_domain_change_supported(domain)
     await dns_service.delete_dns_record(db, record_id)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -563,6 +590,7 @@ async def create_dns_create_request(db: AsyncSession, user: User, domain_id: int
     domain = await _get_domain(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
+    _ensure_domain_change_supported(domain)
 
     return await _create_request(
         db,
@@ -583,6 +611,7 @@ async def create_dns_update_request(db: AsyncSession, user: User, record_id: int
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
     domain = await _get_domain(db, record.domain_id)
+    _ensure_domain_change_supported(domain)
     domain_name = domain.domain_name if domain else None
 
     update_fields = data.model_dump(exclude_unset=True)
@@ -617,6 +646,7 @@ async def create_dns_delete_request(db: AsyncSession, user: User, record_id: int
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
     domain = await _get_domain(db, record.domain_id)
+    _ensure_domain_change_supported(domain)
     domain_name = domain.domain_name if domain else None
 
     return await _create_request(
@@ -647,8 +677,13 @@ async def create_batch_dns_request(db: AsyncSession, user: User, body: dict[str,
     if not domain_ids:
         raise ValueError("domain_ids is required")
 
-    result = await db.execute(select(Domain).where(Domain.id.in_(domain_ids)))
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .where(Domain.id.in_(domain_ids))
+    )
     domains = result.scalars().all()
+    _ensure_domains_change_supported(domains)
     return await _create_request(
         db,
         user=user,
@@ -668,8 +703,13 @@ async def create_batch_nameserver_request(db: AsyncSession, user: User, body: di
     if not domain_ids:
         raise ValueError("domain_ids is required")
 
-    result = await db.execute(select(Domain).where(Domain.id.in_(domain_ids)))
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .where(Domain.id.in_(domain_ids))
+    )
     domains = result.scalars().all()
+    _ensure_domains_change_supported(domains)
     return await _create_request(
         db,
         user=user,
@@ -690,6 +730,12 @@ async def create_batch_nameserver_request(db: AsyncSession, user: User, body: di
 
 
 async def execute_batch_dns_direct(db: AsyncSession, user: User, body: dict[str, Any]) -> ChangeRequest:
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .where(Domain.id.in_(body.get("domain_ids") or []))
+    )
+    _ensure_domains_change_supported(result.scalars().all())
     result = await _execute_batch_dns(db, body)
     domain_ids = body.get("domain_ids") or []
     return _build_direct_result(
@@ -704,6 +750,12 @@ async def execute_batch_dns_direct(db: AsyncSession, user: User, body: dict[str,
 
 
 async def execute_batch_nameserver_direct(db: AsyncSession, user: User, body: dict[str, Any]) -> ChangeRequest:
+    result = await db.execute(
+        select(Domain)
+        .options(selectinload(Domain.account))
+        .where(Domain.id.in_(body.get("domain_ids") or []))
+    )
+    _ensure_domains_change_supported(result.scalars().all())
     result = await _execute_batch_nameservers(db, body)
     domain_ids = body.get("domain_ids") or []
     return _build_direct_result(
@@ -910,6 +962,11 @@ async def _execute_batch_dns(db: AsyncSession, payload: dict[str, Any]) -> dict[
             results.append({"domain_id": domain_id, "status": "error", "message": "域名不存在"})
             continue
         try:
+            _ensure_domain_change_supported(domain)
+        except ValueError as exc:
+            results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "error", "message": str(exc)})
+            continue
+        try:
             account = domain.account
             adapter = get_adapter(account.platform, decrypt_credentials(account.credentials))
             record_infos = [
@@ -946,6 +1003,11 @@ async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) 
             results.append({"domain_id": domain_id, "status": "error", "message": "域名不存在"})
             continue
         try:
+            _ensure_domain_change_supported(domain)
+        except ValueError as exc:
+            results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "error", "message": str(exc)})
+            continue
+        try:
             domain.nameservers = payload.get("nameservers", [])
             results.append({
                 "domain_id": domain_id,
@@ -963,14 +1025,20 @@ async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) 
 async def _execute_change_request(db: AsyncSession, change_request: ChangeRequest) -> dict[str, Any]:
     if change_request.operation_type == OP_DNS_CREATE:
         payload = change_request.payload
+        domain = await _get_domain(db, payload["domain_id"])
+        _ensure_domain_change_supported(domain)
         record = await dns_service.create_dns_record(db, payload["domain_id"], DnsRecordCreate(**payload["data"]))
         return {"record_id": record.id}
     if change_request.operation_type == OP_DNS_UPDATE:
         payload = change_request.payload
+        record_model = await _get_dns_record(db, payload["record_id"])
+        _ensure_domain_change_supported(record_model.domain if record_model else None)
         record = await dns_service.update_dns_record(db, payload["record_id"], DnsRecordUpdate(**payload["data"]))
         return {"record_id": record.id}
     if change_request.operation_type == OP_DNS_DELETE:
         payload = change_request.payload
+        record_model = await _get_dns_record(db, payload["record_id"])
+        _ensure_domain_change_supported(record_model.domain if record_model else None)
         await dns_service.delete_dns_record(db, payload["record_id"])
         return {"record_id": payload["record_id"]}
     if change_request.operation_type == OP_BATCH_DNS_UPDATE:

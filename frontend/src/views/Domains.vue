@@ -40,8 +40,17 @@
     <el-card shadow="never" style="margin-top: 16px">
       <div v-if="selectedDomains.length > 0" class="batch-bar">
         <span class="batch-info">已选择 {{ selectedDomains.length }} 项</span>
+        <el-tag v-if="hasUnsupportedSelection" type="danger" effect="light">仅 Cloudflare 域名支持变更</el-tag>
         <el-button type="primary" :loading="batchLoading" @click="handleBatchSync">批量同步</el-button>
-        <el-button v-if="authStore.isAdmin" type="warning" :loading="batchLoading" @click="showNsDialog = true">批量修改NS</el-button>
+        <el-button
+          v-if="authStore.isAdmin"
+          type="warning"
+          :loading="batchLoading"
+          :disabled="hasUnsupportedSelection"
+          @click="showNsDialog = true"
+        >
+          批量修改NS
+        </el-button>
         <el-button @click="clearSelection">取消选择</el-button>
       </div>
 
@@ -138,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -168,6 +177,7 @@ const showNsDialog = ref(false)
 const nsForm = reactive<string[]>(['', ''])
 
 const platforms = ['cloudflare', 'namecom', 'dynadot', 'godaddy', 'namecheap', 'namesilo', 'openprovider', 'porkbun', 'spaceship']
+const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'cloudflare'))
 
 function handleSelectionChange(rows: DomainRow[]) {
   selectedDomains.value = rows
@@ -255,6 +265,10 @@ async function handleBatchSync() {
 }
 
 async function handleBatchNs() {
+  if (hasUnsupportedSelection.value) {
+    ElMessage.warning('当前仅支持批量修改 Cloudflare 域名')
+    return
+  }
   const nameservers = nsForm.filter(ns => ns.trim())
   if (nameservers.length < 2) {
     ElMessage.warning('请至少填写2个Nameserver')
@@ -318,6 +332,10 @@ function handleReset() {
 }
 
 function gotoDns(row: DomainRow) {
+  if (row.platform !== 'cloudflare') {
+    ElMessage.warning('当前仅支持修改 Cloudflare 域名')
+    return
+  }
   router.push({ path: '/dns', query: { domain: row.domain_name, domain_id: String(row.id), auto_sync: '1' } })
 }
 

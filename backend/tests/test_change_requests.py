@@ -66,6 +66,78 @@ async def test_create_dns_record_returns_pending_change_request(client, async_se
 
 
 @pytest.mark.asyncio
+async def test_create_dns_record_rejects_non_cloudflare_domain(client, async_session, auth_headers):
+    account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="non-cf.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "www",
+            "content": "1.2.3.4",
+            "ttl": 300,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "目前仅支持修改 Cloudflare 平台上的域名"
+
+
+@pytest.mark.asyncio
+async def test_batch_nameserver_request_rejects_non_cloudflare_domain(client, async_session, auth_headers):
+    account = PlatformAccount(
+        platform="namecom",
+        account_name="namecom-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="batch-non-cf.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["ns1.name.com", "ns2.name.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        "/api/v1/batch/nameservers",
+        headers=auth_headers,
+        json={
+            "domain_ids": [domain.id],
+            "nameservers": ["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "目前仅支持修改 Cloudflare 平台上的域名" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_list_change_requests_supports_filters_and_pagination(client, async_session, auth_headers):
     account = PlatformAccount(
         platform="cloudflare",

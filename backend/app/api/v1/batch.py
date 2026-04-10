@@ -1,7 +1,7 @@
 from typing import Literal
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -11,6 +11,10 @@ from app.schemas.change_request import ChangeRequestResponse
 from app.services import change_request_service
 
 router = APIRouter()
+
+
+def _bad_request(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
 class DnsRecordBatchItem(BaseModel):
@@ -44,9 +48,12 @@ async def batch_update_dns(
     db: AsyncSession = Depends(get_db),
 ):
     payload = body.model_dump()
-    if await change_request_service.should_require_approval(db, current_user):
-        return await change_request_service.create_batch_dns_request(db, current_user, payload)
-    return await change_request_service.execute_batch_dns_direct(db, current_user, payload)
+    try:
+        if await change_request_service.should_require_approval(db, current_user):
+            return await change_request_service.create_batch_dns_request(db, current_user, payload)
+        return await change_request_service.execute_batch_dns_direct(db, current_user, payload)
+    except ValueError as exc:
+        raise _bad_request(str(exc))
 
 
 @router.post("/sync")
@@ -78,6 +85,9 @@ async def batch_update_nameservers(
     db: AsyncSession = Depends(get_db),
 ):
     payload = body.model_dump()
-    if await change_request_service.should_require_approval(db, current_user):
-        return await change_request_service.create_batch_nameserver_request(db, current_user, payload)
-    return await change_request_service.execute_batch_nameserver_direct(db, current_user, payload)
+    try:
+        if await change_request_service.should_require_approval(db, current_user):
+            return await change_request_service.create_batch_nameserver_request(db, current_user, payload)
+        return await change_request_service.execute_batch_nameserver_direct(db, current_user, payload)
+    except ValueError as exc:
+        raise _bad_request(str(exc))

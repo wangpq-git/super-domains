@@ -14,6 +14,13 @@ from app.services import change_request_service, dns_service
 router = APIRouter()
 
 
+def _value_error_status(detail: str) -> int:
+    normalized = detail.lower()
+    if "not found" in normalized:
+        return status.HTTP_404_NOT_FOUND
+    return status.HTTP_400_BAD_REQUEST
+
+
 @router.get("/{domain_id}/records", response_model=list[DnsRecordResponse])
 async def list_dns_records(
     domain_id: int,
@@ -54,7 +61,7 @@ async def create_dns_record(
         else:
             record = await change_request_service.execute_dns_create_direct(db, current_user, domain_id, data)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=_value_error_status(str(e)), detail=str(e))
     return record
 
 
@@ -71,7 +78,7 @@ async def update_dns_record(
         else:
             record = await change_request_service.execute_dns_update_direct(db, current_user, record_id, data)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=_value_error_status(str(e)), detail=str(e))
     return record
 
 
@@ -86,4 +93,4 @@ async def delete_dns_record(
             return await change_request_service.create_dns_delete_request(db, current_user, record_id)
         return await change_request_service.execute_dns_delete_direct(db, current_user, record_id)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=_value_error_status(str(e)), detail=str(e))
