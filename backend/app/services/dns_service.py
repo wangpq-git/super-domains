@@ -23,6 +23,20 @@ def _normalize_proxied_value(platform: str, record_type: str, proxied: bool | No
     return proxied
 
 
+def _display_record_name(domain_name: str, record_name: str) -> str:
+    normalized_domain = (domain_name or "").strip().rstrip(".").lower()
+    normalized_name = (record_name or "").strip().rstrip(".")
+    if not normalized_name:
+        return normalized_domain
+
+    lowered_name = normalized_name.lower()
+    if lowered_name in {"@", normalized_domain}:
+        return normalized_domain
+    if lowered_name.endswith(f".{normalized_domain}"):
+        return normalized_name
+    return f"{normalized_name}.{normalized_domain}"
+
+
 async def _get_domain_with_account(db: AsyncSession, domain_id: int) -> Domain | None:
     result = await db.execute(
         select(Domain).options(selectinload(Domain.account)).where(Domain.id == domain_id)
@@ -39,7 +53,11 @@ async def _get_dns_record_with_domain(db: AsyncSession, record_id: int) -> DnsRe
     return result.scalar_one_or_none()
 
 
-async def list_dns_records(db: AsyncSession, domain_id: int, *, sort_by: str = "record_type", sort_order: str = "asc") -> list[DnsRecord]:
+async def list_dns_records(db: AsyncSession, domain_id: int, *, sort_by: str = "record_type", sort_order: str = "asc") -> list[dict]:
+    domain = await _get_domain_with_account(db, domain_id)
+    if not domain:
+        raise ValueError(f"Domain {domain_id} not found")
+
     ALLOWED_SORT_FIELDS = {"record_type", "name", "content", "ttl"}
     query = select(DnsRecord).where(DnsRecord.domain_id == domain_id)
     if sort_by in ALLOWED_SORT_FIELDS:
@@ -48,7 +66,25 @@ async def list_dns_records(db: AsyncSession, domain_id: int, *, sort_by: str = "
     else:
         query = query.order_by(DnsRecord.record_type.asc(), DnsRecord.name.asc())
     result = await db.execute(query)
-    return list(result.scalars().all())
+    records = []
+    for record in result.scalars().all():
+        records.append(
+            {
+                "id": record.id,
+                "domain_id": record.domain_id,
+                "record_type": record.record_type,
+                "name": _display_record_name(domain.domain_name, record.name),
+                "content": record.content,
+                "ttl": record.ttl,
+                "priority": record.priority,
+                "proxied": record.proxied,
+                "external_id": record.external_id,
+                "sync_status": record.sync_status,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
+            }
+        )
+    return records
 
 
 async def sync_dns_records(db: AsyncSession, domain_id: int) -> dict:
