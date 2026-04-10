@@ -5,6 +5,7 @@ from app.models.platform_account import PlatformAccount
 from app.models.domain import Domain
 from app.schemas.platform_account import PlatformAccountCreate, PlatformAccountUpdate
 from app.core.encryption import encrypt_credentials
+from app.services import data_cache_service, system_setting_service
 
 
 async def list_accounts(
@@ -14,40 +15,52 @@ async def list_accounts(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    ALLOWED_SORT_FIELDS = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
-    if sort_by in ALLOWED_SORT_FIELDS:
-        col = getattr(PlatformAccount, sort_by)
-        order_col = col.desc() if sort_order == "desc" else col.asc()
-    else:
-        order_col = PlatformAccount.created_at.desc()
-
-    total_result = await db.execute(select(func.count()).select_from(PlatformAccount))
-    total = total_result.scalar_one()
-
-    result = await db.execute(
-        select(
-            PlatformAccount.id,
-            PlatformAccount.platform,
-            PlatformAccount.account_name,
-            PlatformAccount.is_active,
-            PlatformAccount.last_sync_at,
-            PlatformAccount.sync_status,
-            PlatformAccount.sync_error,
-            PlatformAccount.created_at,
-            func.count(Domain.id).label("domain_count"),
-        )
-        .outerjoin(Domain, Domain.account_id == PlatformAccount.id)
-        .group_by(PlatformAccount.id)
-        .order_by(order_col)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+    ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
+    cache_key = data_cache_service.build_cache_key(
+        "platform_accounts",
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        page_size=page_size,
     )
-    return {
-        "items": [row._asdict() for row in result.all()],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
+
+    async def _load() -> dict:
+        allowed_sort_fields = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
+        if sort_by in allowed_sort_fields:
+            col = getattr(PlatformAccount, sort_by)
+            order_col = col.desc() if sort_order == "desc" else col.asc()
+        else:
+            order_col = PlatformAccount.created_at.desc()
+
+        total_result = await db.execute(select(func.count()).select_from(PlatformAccount))
+        total = total_result.scalar_one()
+
+        result = await db.execute(
+            select(
+                PlatformAccount.id,
+                PlatformAccount.platform,
+                PlatformAccount.account_name,
+                PlatformAccount.is_active,
+                PlatformAccount.last_sync_at,
+                PlatformAccount.sync_status,
+                PlatformAccount.sync_error,
+                PlatformAccount.created_at,
+                func.count(Domain.id).label("domain_count"),
+            )
+            .outerjoin(Domain, Domain.account_id == PlatformAccount.id)
+            .group_by(PlatformAccount.id)
+            .order_by(order_col)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return {
+            "items": [row._asdict() for row in result.all()],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await data_cache_service.get_or_set(cache_key, _load, ttl_seconds=ttl_seconds)
 
 
 async def create_account(db: AsyncSession, data: PlatformAccountCreate, user_id: int) -> PlatformAccount:

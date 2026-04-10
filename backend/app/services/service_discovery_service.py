@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import data_cache_service
 from app.services import system_setting_service
 
 
@@ -99,13 +100,19 @@ def _list_ingresses_sync(kubeconfig: str, namespace: str, timeout_seconds: int) 
 
 
 async def get_service_discovery_config(db: AsyncSession) -> dict[str, Any]:
-    namespace_raw = await system_setting_service.resolve_setting(db, "K8S_INGRESS_NAMESPACE_OPTIONS")
-    kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
-    options = _parse_namespace_options(namespace_raw.value)
-    return {
-        "configured": bool(kubeconfig.strip()),
-        "namespace_options": options,
-    }
+    ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
+    cache_key = data_cache_service.build_cache_key("service_discovery_config")
+
+    async def _load() -> dict[str, Any]:
+        namespace_raw = await system_setting_service.resolve_setting(db, "K8S_INGRESS_NAMESPACE_OPTIONS")
+        kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
+        options = _parse_namespace_options(namespace_raw.value)
+        return {
+            "configured": bool(kubeconfig.strip()),
+            "namespace_options": options,
+        }
+
+    return await data_cache_service.get_or_set(cache_key, _load, ttl_seconds=ttl_seconds)
 
 
 async def list_ingresses(db: AsyncSession, namespace: str | None = None) -> dict[str, Any]:
@@ -125,8 +132,18 @@ async def list_ingresses(db: AsyncSession, namespace: str | None = None) -> dict
 
     kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
     timeout_seconds = await system_setting_service.get_int(db, "K8S_INGRESS_REQUEST_TIMEOUT_SECONDS")
-    items = await asyncio.to_thread(_list_ingresses_sync, kubeconfig, resolved_namespace, max(timeout_seconds, 1))
-    return {
-        "namespace": resolved_namespace,
-        "items": items,
-    }
+    cache_ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
+    cache_key = data_cache_service.build_cache_key(
+        "service_discovery_ingresses",
+        namespace=resolved_namespace,
+        timeout_seconds=timeout_seconds,
+    )
+
+    async def _load() -> dict[str, Any]:
+        items = await asyncio.to_thread(_list_ingresses_sync, kubeconfig, resolved_namespace, max(timeout_seconds, 1))
+        return {
+            "namespace": resolved_namespace,
+            "items": items,
+        }
+
+    return await data_cache_service.get_or_set(cache_key, _load, ttl_seconds=cache_ttl_seconds)

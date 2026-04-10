@@ -10,6 +10,7 @@ from app.core.encryption import decrypt_credentials, encrypt_credentials
 from app.models.audit_log import AuditLog
 from app.models.system_setting import SystemSetting
 from app.models.user import User
+from app.services import data_cache_service
 
 
 SETTING_DEFINITIONS = {
@@ -262,6 +263,16 @@ SETTING_DEFINITIONS = {
         "description": "调用腾讯云 COS 接口时的超时时间。",
         "value_type": "integer",
         "default": 15,
+        "is_secret": False,
+        "restart_required": False,
+        "public": False,
+    },
+    "DATA_CACHE_TTL_SECONDS": {
+        "category": "performance",
+        "label": "页面数据缓存秒数",
+        "description": "用于缓存列表、报表、服务解析和 COS 解析结果，设置为 0 表示关闭缓存。",
+        "value_type": "integer",
+        "default": 30,
         "is_secret": False,
         "restart_required": False,
         "public": False,
@@ -533,6 +544,7 @@ async def update_settings(db: AsyncSession, admin: User, payload: list[dict[str,
             )
         )
     await db.commit()
+    data_cache_service.clear()
     return await list_settings(db)
 
 

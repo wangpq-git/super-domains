@@ -21,5 +21,7 @@ export function getCosDiscoveryConfig() {
 }
 
 export function getCosDomains() {
-  return request.get<CosDiscoveryDomainListResponse>('/cos-discovery/domains')
+  return request.get<CosDiscoveryDomainListResponse>('/cos-discovery/domains', {
+    timeout: 120000,
+  })
 }

@@ -34,6 +34,10 @@ async def test_system_settings_list_and_update_mask_secret(client, auth_headers)
     listed = {item["key"]: item for item in list_resp.json()["items"]}
     assert listed["FEISHU_APPROVAL_WEBHOOK_URL"]["source"] == "database"
     assert listed["FEISHU_APPROVAL_WEBHOOK_URL"]["masked_value"]
+    assert listed["TENCENT_COS_SECRET_ID"]["category"] == "cos_discovery"
+    assert listed["TENCENT_COS_SECRET_KEY"]["category"] == "cos_discovery"
+    assert listed["TENCENT_COS_REQUEST_TIMEOUT_SECONDS"]["category"] == "cos_discovery"
+    assert listed["DATA_CACHE_TTL_SECONDS"]["category"] == "performance"
 
 
 @pytest.mark.asyncio

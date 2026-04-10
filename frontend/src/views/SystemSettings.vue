@@ -120,6 +120,7 @@ const categories = [
   { key: 'approval', label: '审批策略' },
   { key: 'feishu', label: '飞书审批' },
   { key: 'ldap', label: 'LDAP 登录' },
+  { key: 'performance', label: '性能缓存' },
   { key: 'service_discovery', label: '服务解析' },
   { key: 'cos_discovery', label: 'COS解析' },
   { key: 'notification', label: '通知配置' }

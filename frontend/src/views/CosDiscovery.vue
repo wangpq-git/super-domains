@@ -6,7 +6,7 @@
           <div class="page-title">COS 解析</div>
           <div class="page-subtitle">查看腾讯云 COS 存储桶已配置的自定义域名、源站类型与 CNAME 值。</div>
           <div class="page-description">
-            账号密钥从配置中心读取，页面只展示已配置自定义域名的存储桶记录。
+            账号密钥从配置中心读取，页面会按存储桶聚合展示该桶下的全部自定义域名。
           </div>
         </div>
 
@@ -56,7 +56,7 @@
                   已跳过 {{ skippedBucketCount }} 个无权限或未配置域名的桶
                 </el-tag>
               </div>
-              <div class="table-subtitle">支持按存储桶名、自定义域名或 CNAME 值快速筛选。</div>
+              <div class="table-subtitle">同一个存储桶下的多个域名会合并展示，支持按存储桶名、自定义域名或 CNAME 值快速筛选。</div>
             </div>
             <div class="table-tools">
               <el-input
@@ -67,7 +67,7 @@
                 @input="handleKeywordChange"
                 @clear="handleKeywordChange"
               />
-              <el-tag type="info">共 {{ filteredDomainItems.length }} 条</el-tag>
+              <el-tag type="info">共 {{ filteredBucketRows.length }} 个存储桶</el-tag>
               <el-select v-model="pageSize" class="page-size-select" @change="handlePageSizeChange">
                 <el-option
                   v-for="size in pageSizeOptions"
@@ -82,25 +82,61 @@
 
         <el-table
           v-loading="loading"
-          :data="pagedDomainItems"
+          :data="pagedBucketRows"
           empty-text="暂无 COS 域名数据"
           border
           stripe
           class="domain-table"
         >
           <el-table-column prop="bucket_name" label="存储桶名" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="custom_domain" label="自定义域名" min-width="280" show-overflow-tooltip />
-          <el-table-column prop="origin_type" label="源站类型" min-width="160" />
-          <el-table-column prop="cname" label="CNAME 值" min-width="360" show-overflow-tooltip />
+          <el-table-column label="自定义域名" min-width="320">
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div
+                  v-for="(item, index) in row.domain_entries"
+                  :key="`${row.bucket_name}-domain-${index}`"
+                  class="stack-line"
+                >
+                  {{ item.custom_domain || '-' }}
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="源站类型" min-width="160">
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div
+                  v-for="(item, index) in row.domain_entries"
+                  :key="`${row.bucket_name}-origin-${index}`"
+                  class="stack-line"
+                >
+                  {{ item.origin_type || '-' }}
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="CNAME 值" min-width="380">
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div
+                  v-for="(item, index) in row.domain_entries"
+                  :key="`${row.bucket_name}-cname-${index}`"
+                  class="stack-line stack-code"
+                >
+                  {{ item.cname || '-' }}
+                </div>
+              </div>
+            </template>
+          </el-table-column>
         </el-table>
 
-        <div v-if="filteredDomainItems.length" class="pagination-wrap">
+        <div v-if="filteredBucketRows.length" class="pagination-wrap">
           <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
             background
             layout="total, prev, pager, next, jumper"
-            :total="filteredDomainItems.length"
+            :total="filteredBucketRows.length"
           />
         </div>
       </el-card>
@@ -119,6 +155,12 @@ import {
   type CosDiscoveryDomainItem,
 } from '@/api/cosDiscovery'
 
+interface CosBucketRow {
+  bucket_name: string
+  domain_entries: CosDiscoveryDomainItem[]
+  search_text: string
+}
+
 const router = useRouter()
 const authStore = useAuthStore()
 
@@ -133,20 +175,40 @@ const pageSize = ref(20)
 const pageSizeOptions = [10, 20, 50, 100]
 
 const domainCount = computed(() => domainItems.value.length)
-const bucketCount = computed(() => new Set(domainItems.value.map((item) => item.bucket_name)).size)
-const filteredDomainItems = computed(() => {
+const groupedBucketRows = computed<CosBucketRow[]>(() => {
+  const bucketMap = new Map<string, CosDiscoveryDomainItem[]>()
+
+  domainItems.value.forEach((item) => {
+    const entries = bucketMap.get(item.bucket_name) || []
+    entries.push(item)
+    bucketMap.set(item.bucket_name, entries)
+  })
+
+  return Array.from(bucketMap.entries())
+    .map(([bucket_name, domain_entries]) => ({
+      bucket_name,
+      domain_entries,
+      search_text: [
+        bucket_name,
+        ...domain_entries.flatMap((item) => [item.custom_domain, item.origin_type, item.cname]),
+      ]
+        .join(' ')
+        .toLowerCase(),
+    }))
+    .sort((a, b) => a.bucket_name.localeCompare(b.bucket_name))
+})
+const bucketCount = computed(() => groupedBucketRows.value.length)
+const filteredBucketRows = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   if (!query) {
-    return domainItems.value
+    return groupedBucketRows.value
   }
 
-  return domainItems.value.filter((item) => {
-    return [item.bucket_name, item.custom_domain, item.cname].some((value) => value.toLowerCase().includes(query))
-  })
+  return groupedBucketRows.value.filter((item) => item.search_text.includes(query))
 })
-const pagedDomainItems = computed(() => {
+const pagedBucketRows = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return filteredDomainItems.value.slice(start, start + pageSize.value)
+  return filteredBucketRows.value.slice(start, start + pageSize.value)
 })
 
 function handleKeywordChange() {
@@ -313,6 +375,27 @@ onMounted(async () => {
 .domain-table :deep(.el-table__header th) {
   background: #f8fafc;
   color: #374151;
+}
+
+.domain-table :deep(.el-table__cell) {
+  vertical-align: top;
+}
+
+.stack-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.stack-line {
+  min-height: 22px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.stack-code {
+  color: #4b5563;
 }
 
 .empty-state {

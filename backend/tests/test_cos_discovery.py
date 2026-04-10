@@ -86,7 +86,7 @@ async def test_cos_discovery_domains_requires_credentials(client, auth_headers):
     assert resp.json()["detail"] == "请先在配置中心填写腾讯云 SecretId 和 SecretKey"
 
 
-def test_list_cos_domains_sync_skips_denied_or_unconfigured_bucket(monkeypatch):
+def test_list_cos_domains_sync_keeps_bucket_when_domain_is_not_configured(monkeypatch):
     class FakeClient:
         def __init__(self, config):
             self.region = getattr(config, "_region", None)
@@ -131,7 +131,13 @@ def test_list_cos_domains_sync_skips_denied_or_unconfigured_bucket(monkeypatch):
                 "custom_domain": "s3.example.com",
                 "origin_type": "静态网站源站",
                 "cname": "allowed-bucket.cos-website.ap-singapore.myqcloud.com",
+            },
+            {
+                "bucket_name": "empty-bucket",
+                "custom_domain": "",
+                "origin_type": "",
+                "cname": "",
             }
         ],
-        "skipped_bucket_count": 2,
+        "skipped_bucket_count": 1,
     }
