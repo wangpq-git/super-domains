@@ -188,6 +188,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { formatDateTime } from '@/utils/format'
 import {
   approveChangeRequest,
   cancelChangeRequest,
@@ -218,8 +219,7 @@ const actionLoadingId = ref<number | null>(null)
 const actionType = ref('')
 
 function formatTime(value: string | null) {
-  if (!value) return '-'
-  return value.replace('T', ' ').slice(0, 19)
+  return formatDateTime(value)
 }
 
 function prettyJson(value: Record<string, any> | null | undefined) {

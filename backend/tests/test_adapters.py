@@ -82,6 +82,39 @@ def test_dynadot_parse_domain_nameservers():
     assert domains[1].nameservers == DEFAULT_DYNADOT_NAMESERVERS
 
 
+def test_dynadot_parse_domain_list_with_nested_main_domains_object():
+    adapter = DynadotAdapter({"api_key": "test"})
+    domains = adapter._parse_domain_list({
+        "ListDomainInfoResponse": {
+            "ResponseCode": 0,
+            "Status": "success",
+            "MainDomains": {
+                "DomainInfo": [
+                    {
+                        "Name": "nested.example",
+                        "Expiration": "2030-01-01",
+                        "Registration": "2025-01-01",
+                        "Status": "active",
+                    }
+                ]
+            },
+        }
+    })
+
+    assert len(domains) == 1
+    assert domains[0].name == "nested.example"
+
+
+def test_dynadot_extracts_response_error():
+    adapter = DynadotAdapter({"api_key": "bad-key"})
+
+    error = adapter._extract_api_error({
+        "Response": {"ResponseCode": "-1", "Error": "invalid key"}
+    })
+
+    assert error == "invalid key (code: -1)"
+
+
 @pytest.mark.asyncio
 async def test_porkbun_get_domain_nameservers_falls_back_to_public_dns(monkeypatch):
     adapter = PorkbunAdapter({"api_key": "test", "secret_key": "secret"})

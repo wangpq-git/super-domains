@@ -55,6 +55,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getUsers, updateUser } from '@/api/users'
+import { formatDateTime } from '@/utils/format'
 
 interface UserItem {
   id: number
@@ -71,8 +72,7 @@ const users = ref<UserItem[]>([])
 const loading = ref(false)
 
 function formatTime(val: string): string {
-  if (!val) return '-'
-  return val.replace('T', ' ').slice(0, 19)
+  return formatDateTime(val)
 }
 
 async function fetchUsers() {

@@ -16,6 +16,21 @@ from app.services import platform_service
 router = APIRouter()
 
 
+async def _build_platform_response(db: AsyncSession, account) -> dict:
+    domain_count = await platform_service.get_account_domain_count(db, account.id)
+    return {
+        "id": account.id,
+        "platform": account.platform,
+        "account_name": account.account_name,
+        "is_active": account.is_active,
+        "last_sync_at": account.last_sync_at,
+        "sync_status": account.sync_status,
+        "sync_error": account.sync_error,
+        "domain_count": domain_count,
+        "created_at": account.created_at,
+    }
+
+
 @router.get("", response_model=PlatformAccountListResponse)
 async def list_platforms(
     sort_by: str = Query("created_at", description="排序字段"),
@@ -42,18 +57,7 @@ async def create_platform(
 ):
     account = await platform_service.create_account(db, data, admin.id)
     result = await platform_service.get_account(db, account.id)
-    result_dict = {
-        "id": result.id,
-        "platform": result.platform,
-        "account_name": result.account_name,
-        "is_active": result.is_active,
-        "last_sync_at": result.last_sync_at,
-        "sync_status": result.sync_status,
-        "sync_error": result.sync_error,
-        "domain_count": 0,
-        "created_at": result.created_at,
-    }
-    return result_dict
+    return await _build_platform_response(db, result)
 
 
 @router.get("/{account_id}", response_model=PlatformAccountResponse)
@@ -61,18 +65,7 @@ async def get_platform(account_id: int, db: AsyncSession = Depends(get_db)):
     account = await platform_service.get_account(db, account_id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    result = {
-        "id": account.id,
-        "platform": account.platform,
-        "account_name": account.account_name,
-        "is_active": account.is_active,
-        "last_sync_at": account.last_sync_at,
-        "sync_status": account.sync_status,
-        "sync_error": account.sync_error,
-        "domain_count": len(account.domains),
-        "created_at": account.created_at,
-    }
-    return result
+    return await _build_platform_response(db, account)
 
 
 @router.put("/{account_id}", response_model=PlatformAccountResponse)
@@ -85,18 +78,7 @@ async def update_platform(
     account = await platform_service.update_account(db, account_id, data)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    result = {
-        "id": account.id,
-        "platform": account.platform,
-        "account_name": account.account_name,
-        "is_active": account.is_active,
-        "last_sync_at": account.last_sync_at,
-        "sync_status": account.sync_status,
-        "sync_error": account.sync_error,
-        "domain_count": len(account.domains),
-        "created_at": account.created_at,
-    }
-    return result
+    return await _build_platform_response(db, account)
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

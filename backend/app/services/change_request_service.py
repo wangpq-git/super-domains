@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,9 +19,10 @@ from app.models.domain import Domain
 from app.models.user import User
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
 from app.services import dns_service, system_setting_service
-from app.services.notification_service import send_webhook
+from app.services.notification_service import send_feishu_bot_interactive_message, send_webhook
 
 logger = logging.getLogger(__name__)
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 STATUS_PENDING = "pending_approval"
 STATUS_APPROVED = "approved"
@@ -86,46 +88,147 @@ def build_feishu_change_request_card(
     result_note: str | None = None,
     base_url: str = "",
 ) -> dict[str, Any]:
-    base_url = base_url.rstrip("/")
-    request_detail = {
-        "request_no": change_request.request_no,
-        "operation_type": change_request.operation_type,
-        "status": change_request.status,
-        "requester": change_request.requester_name or str(change_request.requester_user_id),
-        "domain_id": change_request.domain_id,
-        "target_type": change_request.target_type,
-        "target_id": change_request.target_id,
-        "risk": change_request.risk_level,
+    operation_labels = {
+        OP_DNS_CREATE: "新增 DNS 记录",
+        OP_DNS_UPDATE: "修改 DNS 记录",
+        OP_DNS_DELETE: "删除 DNS 记录",
+        OP_BATCH_DNS_UPDATE: "批量修改 DNS",
+        OP_BATCH_NAMESERVER_UPDATE: "批量修改 NS",
     }
-    if base_url:
-        request_detail["approve_url"] = f"{base_url}/api/v1/change-requests/{change_request.id}/approve"
-        request_detail["reject_url"] = f"{base_url}/api/v1/change-requests/{change_request.id}/reject"
+    status_labels = {
+        STATUS_PENDING: "待审批",
+        STATUS_APPROVED: "已批准",
+        STATUS_REJECTED: "已拒绝",
+        STATUS_EXECUTING: "执行中",
+        STATUS_SUCCEEDED: "已执行",
+        STATUS_FAILED: "执行失败",
+        STATUS_CANCELLED: "已取消",
+    }
+    risk_labels = {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+    }
+    header_templates = {
+        STATUS_PENDING: "orange",
+        STATUS_APPROVED: "turquoise",
+        STATUS_EXECUTING: "blue",
+        STATUS_SUCCEEDED: "green",
+        STATUS_REJECTED: "red",
+        STATUS_FAILED: "red",
+        STATUS_CANCELLED: "grey",
+    }
+
+    base_url = base_url.rstrip("/")
+    payload_data = change_request.payload.get("data", {}) if isinstance(change_request.payload, dict) else {}
+    created_at = (
+        change_request.created_at.replace(tzinfo=UTC).astimezone(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        if change_request.created_at
+        else "-"
+    )
+    domain_name = (
+        (change_request.payload.get("domain_name") if isinstance(change_request.payload, dict) else None)
+        or payload_data.get("domain_name")
+        or change_request.after_snapshot.get("domain_name")
+        or change_request.before_snapshot.get("domain_name")
+        or (f"ID {change_request.domain_id}" if change_request.domain_id else "-")
+    )
+    record_type = payload_data.get("record_type") or change_request.after_snapshot.get("record_type") or "-"
+    record_name = payload_data.get("name") or change_request.after_snapshot.get("name") or "-"
+    record_value = payload_data.get("content") or change_request.after_snapshot.get("content") or "-"
+    ttl = payload_data.get("ttl") or change_request.after_snapshot.get("ttl") or "-"
+    status_label = status_labels.get(change_request.status, change_request.status)
+    operation_label = operation_labels.get(change_request.operation_type, change_request.operation_type)
+    risk_label = risk_labels.get(change_request.risk_level, change_request.risk_level or "-")
+    header_template = header_templates.get(change_request.status, "blue")
+    requester_name = change_request.requester_name or str(change_request.requester_user_id)
+    summary_text = f"`{domain_name}` · 状态 `{status_label}` · 风险 `{risk_label}`"
+    if result_note:
+        summary_text = f"`{domain_name}` · `{status_label}`"
 
     elements = [
+        {
+            "tag": "markdown",
+            "content": (
+                f"**{operation_label}**  \n"
+                f"{summary_text}"
+            ),
+        },
+        {
+            "tag": "div",
+            "fields": [
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**域名**\n`{domain_name}`",
+                    },
+                },
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**记录类型**\n`{record_type}`",
+                    },
+                },
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**主机记录**\n`{record_name}`",
+                    },
+                },
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**TTL**\n`{ttl}`",
+                    },
+                },
+            ],
+        },
         {
             "tag": "div",
             "text": {
                 "tag": "lark_md",
                 "content": (
-                    f"**操作**: {change_request.operation_type}\n"
-                    f"**申请人**: {change_request.requester_name or change_request.requester_user_id}\n"
-                    f"**风险**: {change_request.risk_level}\n"
-                    f"**状态**: {change_request.status}\n"
-                    f"**详情**: `{json.dumps(request_detail, ensure_ascii=False)}`"
+                    f"**记录值**\n"
+                    f"`{record_value}`"
                 ),
             },
-        }
+        },
+        {"tag": "hr"},
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    f"**审批信息**\n"
+                    f"> 申请人：{requester_name}\n"
+                    f"> 提交时间：{created_at}\n"
+                    f"> 变更单号：`{change_request.request_no}`"
+                ),
+            },
+        },
     ]
     if result_note:
         elements.append(
             {
-                "tag": "note",
-                "elements": [
-                    {
-                        "tag": "plain_text",
-                        "content": result_note,
-                    }
-                ],
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**处理结果**\n> {result_note}",
+                },
+            }
+        )
+    else:
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**当前状态**\n> {status_label}",
+                },
             }
         )
     if include_actions:
@@ -154,9 +257,23 @@ def build_feishu_change_request_card(
                 ],
             }
         )
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": f"请求 ID：{change_request.id} · 目标类型：{change_request.target_type}",
+                }
+            ],
+        }
+    )
     return {
         "config": {"wide_screen_mode": True},
-        "header": {"title": {"tag": "plain_text", "content": f"变更审批 #{change_request.request_no}"}},
+        "header": {
+            "template": header_template,
+            "title": {"tag": "plain_text", "content": f"{operation_label} · {status_label}"},
+        },
         "elements": elements,
     }
 
@@ -182,32 +299,60 @@ def build_change_request_result_note(change_request: ChangeRequest) -> str:
 
 async def _notify_change_request(db: AsyncSession, change_request: ChangeRequest) -> None:
     webhook_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_WEBHOOK_URL")
+    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
+    app_id = await system_setting_service.get_string(db, "FEISHU_BOT_APP_ID")
+    app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
+    chat_id = await system_setting_service.get_string(db, "FEISHU_APPROVAL_CHAT_ID")
+    card = build_feishu_change_request_card(change_request, base_url=base_url)
+
+    if app_id and app_secret and chat_id:
+        sent_message_id = await send_feishu_bot_interactive_message(
+            app_id=app_id,
+            app_secret=app_secret,
+            chat_id=chat_id,
+            card=card,
+        )
+        if sent_message_id:
+            if isinstance(change_request.payload, dict):
+                change_request.payload = {
+                    **change_request.payload,
+                    "feishu_message_id": sent_message_id,
+                }
+                await db.commit()
+            return
+
     if not webhook_url:
         return
-    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
-
-    payload = {
-        "msg_type": "interactive",
-        "card": build_feishu_change_request_card(change_request, base_url=base_url),
-    }
+    payload = {"msg_type": "interactive", "card": card}
     await send_webhook(webhook_url, payload)
 
 
 async def _notify_change_request_result(db: AsyncSession, change_request: ChangeRequest, result_note: str) -> None:
     webhook_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_WEBHOOK_URL")
+    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
+    app_id = await system_setting_service.get_string(db, "FEISHU_BOT_APP_ID")
+    app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
+    chat_id = await system_setting_service.get_string(db, "FEISHU_APPROVAL_CHAT_ID")
+    card = build_feishu_change_request_card(
+        change_request,
+        include_actions=False,
+        result_note=result_note,
+        base_url=base_url,
+    )
+
+    if app_id and app_secret and chat_id:
+        sent_message_id = await send_feishu_bot_interactive_message(
+            app_id=app_id,
+            app_secret=app_secret,
+            chat_id=chat_id,
+            card=card,
+        )
+        if sent_message_id:
+            return
+
     if not webhook_url:
         return
-    base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
-
-    payload = {
-        "msg_type": "interactive",
-        "card": build_feishu_change_request_card(
-            change_request,
-            include_actions=False,
-            result_note=result_note,
-            base_url=base_url,
-        ),
-    }
+    payload = {"msg_type": "interactive", "card": card}
     await send_webhook(webhook_url, payload)
 
 
@@ -222,6 +367,9 @@ async def should_require_approval(db: AsyncSession, user: User) -> bool:
 
 
 async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int, data: DnsRecordCreate) -> ChangeRequest:
+    domain = await _get_domain(db, domain_id)
+    if not domain:
+        raise ValueError(f"Domain {domain_id} not found")
     record = await dns_service.create_dns_record(db, domain_id, data)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -234,9 +382,9 @@ async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int
         target_type="dns_record",
         target_id=record.id,
         domain_id=domain_id,
-        payload={"domain_id": domain_id, "data": data.model_dump()},
-        before_snapshot={},
-        after_snapshot=data.model_dump(),
+        payload={"domain_id": domain_id, "domain_name": domain.domain_name, "data": data.model_dump()},
+        before_snapshot={"domain_name": domain.domain_name},
+        after_snapshot={**data.model_dump(), "domain_name": domain.domain_name},
         risk_level="low",
         status=STATUS_SUCCEEDED,
         approval_channel="direct",
@@ -252,6 +400,10 @@ async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int
 
 
 async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int, data: DnsRecordUpdate) -> ChangeRequest:
+    existing = await _get_dns_record(db, record_id)
+    if not existing:
+        raise ValueError(f"DNS record {record_id} not found")
+    domain = await _get_domain(db, existing.domain_id)
     record = await dns_service.update_dns_record(db, record_id, data)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -264,9 +416,13 @@ async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int
         target_type="dns_record",
         target_id=record.id,
         domain_id=record.domain_id,
-        payload={"record_id": record_id, "data": data.model_dump(exclude_unset=True)},
+        payload={
+            "record_id": record_id,
+            "domain_name": domain.domain_name if domain else None,
+            "data": data.model_dump(exclude_unset=True),
+        },
         before_snapshot={},
-        after_snapshot=data.model_dump(exclude_unset=True),
+        after_snapshot={**data.model_dump(exclude_unset=True), "domain_name": domain.domain_name if domain else None},
         risk_level="low",
         status=STATUS_SUCCEEDED,
         approval_channel="direct",
@@ -282,6 +438,10 @@ async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int
 
 
 async def execute_dns_delete_direct(db: AsyncSession, user: User, record_id: int) -> ChangeRequest:
+    existing = await _get_dns_record(db, record_id)
+    if not existing:
+        raise ValueError(f"DNS record {record_id} not found")
+    domain = await _get_domain(db, existing.domain_id)
     await dns_service.delete_dns_record(db, record_id)
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
@@ -293,9 +453,9 @@ async def execute_dns_delete_direct(db: AsyncSession, user: User, record_id: int
         operation_type=OP_DNS_DELETE,
         target_type="dns_record",
         target_id=record_id,
-        domain_id=None,
-        payload={"record_id": record_id},
-        before_snapshot={},
+        domain_id=existing.domain_id,
+        payload={"record_id": record_id, "domain_name": domain.domain_name if domain else None},
+        before_snapshot={"domain_name": domain.domain_name if domain else None},
         after_snapshot={},
         risk_level="low",
         status=STATUS_SUCCEEDED,
@@ -412,9 +572,9 @@ async def create_dns_create_request(db: AsyncSession, user: User, domain_id: int
         target_type="dns_record",
         target_id=None,
         domain_id=domain_id,
-        payload={"domain_id": domain_id, "data": data.model_dump()},
-        before_snapshot={},
-        after_snapshot=data.model_dump(),
+        payload={"domain_id": domain_id, "domain_name": domain.domain_name, "data": data.model_dump()},
+        before_snapshot={"domain_name": domain.domain_name},
+        after_snapshot={**data.model_dump(), "domain_name": domain.domain_name},
     )
 
 
@@ -422,6 +582,8 @@ async def create_dns_update_request(db: AsyncSession, user: User, record_id: int
     record = await _get_dns_record(db, record_id)
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
+    domain = await _get_domain(db, record.domain_id)
+    domain_name = domain.domain_name if domain else None
 
     update_fields = data.model_dump(exclude_unset=True)
     if not update_fields:
@@ -435,9 +597,10 @@ async def create_dns_update_request(db: AsyncSession, user: User, record_id: int
         target_type="dns_record",
         target_id=record_id,
         domain_id=record.domain_id,
-        payload={"record_id": record_id, "data": update_fields},
+        payload={"record_id": record_id, "domain_name": domain_name, "data": update_fields},
         before_snapshot={
             "id": record.id,
+            "domain_name": domain_name,
             "record_type": record.record_type,
             "name": record.name,
             "content": record.content,
@@ -445,7 +608,7 @@ async def create_dns_update_request(db: AsyncSession, user: User, record_id: int
             "priority": record.priority,
             "proxied": record.proxied,
         },
-        after_snapshot=update_fields,
+        after_snapshot={**update_fields, "domain_name": domain_name},
     )
 
 
@@ -453,6 +616,8 @@ async def create_dns_delete_request(db: AsyncSession, user: User, record_id: int
     record = await _get_dns_record(db, record_id)
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
+    domain = await _get_domain(db, record.domain_id)
+    domain_name = domain.domain_name if domain else None
 
     return await _create_request(
         db,
@@ -462,9 +627,10 @@ async def create_dns_delete_request(db: AsyncSession, user: User, record_id: int
         target_type="dns_record",
         target_id=record_id,
         domain_id=record.domain_id,
-        payload={"record_id": record_id},
+        payload={"record_id": record_id, "domain_name": domain_name},
         before_snapshot={
             "id": record.id,
+            "domain_name": domain_name,
             "record_type": record.record_type,
             "name": record.name,
             "content": record.content,
@@ -635,6 +801,7 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
     query_values = {
         "username": identifiers.get("username"),
         "email": identifiers.get("email"),
+        "display_name": identifiers.get("username"),
     }
 
     admin_map = await _parse_admin_map(db)
@@ -649,7 +816,7 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
             if isinstance(mapped, str):
                 query_values.setdefault("username", mapped)
 
-    for field in ("username", "email"):
+    for field in ("username", "email", "display_name"):
         value = query_values.get(field)
         if not value:
             continue
@@ -659,10 +826,39 @@ async def resolve_admin_user(db: AsyncSession, identifiers: dict[str, Any]) -> U
         if user and user.role == "admin" and user.is_active:
             return user
 
+    fallback_candidates: list[Any] = []
+    for mapped in admin_map.values():
+        if mapped not in fallback_candidates:
+            fallback_candidates.append(mapped)
+
+    if len(fallback_candidates) == 1:
+        fallback = fallback_candidates[0]
+        if isinstance(fallback, int) or (isinstance(fallback, str) and fallback.isdigit()):
+            user = await get_admin_user_by_id(db, int(fallback))
+            if user:
+                logger.warning("Falling back to sole mapped Feishu admin id=%s for identifiers=%s", fallback, identifiers)
+                return user
+        elif isinstance(fallback, str):
+            for field in ("username", "email", "display_name"):
+                column = getattr(User, field)
+                result = await db.execute(select(User).where(column == fallback))
+                user = result.scalar_one_or_none()
+                if user and user.role == "admin" and user.is_active:
+                    logger.warning("Falling back to sole mapped Feishu admin=%s for identifiers=%s", fallback, identifiers)
+                    return user
+
+    logger.warning("Unable to resolve Feishu approver from identifiers=%s admin_map_keys=%s", identifiers, sorted(admin_map.keys()))
     return None
 
 
-async def reject_change_request(db: AsyncSession, change_request: ChangeRequest, approver: User, reason: str) -> ChangeRequest:
+async def reject_change_request(
+    db: AsyncSession,
+    change_request: ChangeRequest,
+    approver: User,
+    reason: str,
+    *,
+    send_result_notification: bool = True,
+) -> ChangeRequest:
     if change_request.status != STATUS_PENDING:
         raise ValueError("Change request has already been processed")
 
@@ -681,14 +877,15 @@ async def reject_change_request(db: AsyncSession, change_request: ChangeRequest,
     )
     await db.commit()
     await db.refresh(change_request)
-    try:
-        await _notify_change_request_result(
-            db,
-            change_request,
-            build_change_request_result_note(change_request),
-        )
-    except Exception:
-        logger.exception("Failed to send rejection notification for %s", change_request.request_no)
+    if send_result_notification:
+        try:
+            await _notify_change_request_result(
+                db,
+                change_request,
+                build_change_request_result_note(change_request),
+            )
+        except Exception:
+            logger.exception("Failed to send rejection notification for %s", change_request.request_no)
     return change_request
 
 
@@ -783,7 +980,14 @@ async def _execute_change_request(db: AsyncSession, change_request: ChangeReques
     raise ValueError(f"Unsupported operation type: {change_request.operation_type}")
 
 
-async def approve_change_request(db: AsyncSession, change_request: ChangeRequest, approver: User) -> ChangeRequest:
+async def approve_change_request(
+    db: AsyncSession,
+    change_request: ChangeRequest,
+    approver: User,
+    *,
+    send_result_notification: bool = True,
+) -> ChangeRequest:
+    request_id = change_request.id
     if change_request.status != STATUS_PENDING:
         raise ValueError("Change request has already been processed")
 
@@ -805,18 +1009,19 @@ async def approve_change_request(db: AsyncSession, change_request: ChangeRequest
         change_request.execution_result = result
         await _add_event(db, change_request, event_type="succeeded", actor_type="system", actor_id=None, detail=result)
         await db.commit()
-        try:
-            await _notify_change_request_result(
-                db,
-                change_request,
-                build_change_request_result_note(change_request),
-            )
-        except Exception:
-            logger.exception("Failed to send success notification for %s", change_request.request_no)
+        if send_result_notification:
+            try:
+                await _notify_change_request_result(
+                    db,
+                    change_request,
+                    build_change_request_result_note(change_request),
+                )
+            except Exception:
+                logger.exception("Failed to send success notification for %s", change_request.request_no)
     except Exception as exc:
-        logger.exception("Failed to execute change request %s", change_request.id)
+        logger.exception("Failed to execute change request %s", request_id)
         await db.rollback()
-        change_request = await db.get(ChangeRequest, change_request.id)
+        change_request = await db.get(ChangeRequest, request_id)
         change_request.status = STATUS_FAILED
         change_request.error_message = str(exc)
         change_request.executed_at = datetime.now(UTC).replace(tzinfo=None)
@@ -829,14 +1034,15 @@ async def approve_change_request(db: AsyncSession, change_request: ChangeRequest
             detail={"error": str(exc)},
         )
         await db.commit()
-        try:
-            await _notify_change_request_result(
-                db,
-                change_request,
-                build_change_request_result_note(change_request),
-            )
-        except Exception:
-            logger.exception("Failed to send failure notification for %s", change_request.request_no)
+        if send_result_notification:
+            try:
+                await _notify_change_request_result(
+                    db,
+                    change_request,
+                    build_change_request_result_note(change_request),
+                )
+            except Exception:
+                logger.exception("Failed to send failure notification for %s", change_request.request_no)
 
     await db.refresh(change_request)
     return change_request

@@ -1,4 +1,7 @@
 import pytest
+from datetime import datetime
+
+from app.models.domain import Domain
 
 
 @pytest.mark.asyncio
@@ -41,8 +44,10 @@ async def test_list_accounts(client, auth_headers):
     resp = await client.get("/api/v1/platforms")
     assert resp.status_code == 200
     data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) >= 2
+    assert isinstance(data, dict)
+    assert isinstance(data["items"], list)
+    assert len(data["items"]) >= 2
+    assert data["total"] >= 2
 
 
 @pytest.mark.asyncio
@@ -68,6 +73,39 @@ async def test_update_account(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_update_account_returns_domain_count_without_lazy_load(client, auth_headers, async_session):
+    create_resp = await client.post(
+        "/api/v1/platforms",
+        json={
+            "platform": "dynadot",
+            "account_name": "sync-test",
+            "credentials": {"api_key": "old-key"},
+        },
+        headers=auth_headers,
+    )
+    account_id = create_resp.json()["id"]
+
+    async_session.add(
+        Domain(
+            account_id=account_id,
+            domain_name="example.com",
+            tld="com",
+            status="active",
+            expiry_date=datetime(2030, 1, 1),
+        )
+    )
+    await async_session.commit()
+
+    update_resp = await client.put(
+        f"/api/v1/platforms/{account_id}",
+        json={"credentials": {"api_key": "new-key"}},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["domain_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_delete_account(client, auth_headers):
     create_resp = await client.post(
         "/api/v1/platforms",
@@ -79,7 +117,7 @@ async def test_delete_account(client, auth_headers):
     )
     account_id = create_resp.json()["id"]
 
-    del_resp = await client.delete(f"/api/v1/platforms/{account_id}")
+    del_resp = await client.delete(f"/api/v1/platforms/{account_id}", headers=auth_headers)
     assert del_resp.status_code == 204
 
     get_resp = await client.get(f"/api/v1/platforms/{account_id}")

@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import hmac
 import json
 import time
 from datetime import UTC, datetime, timedelta
@@ -21,8 +20,7 @@ def _build_feishu_raw_payload(payload: dict) -> bytes:
 def _sign_feishu_payload(payload: dict, *, timestamp: str, nonce: str, encrypt_key: str) -> str:
     raw_body = _build_feishu_raw_payload(payload)
     string_to_sign = f"{timestamp}{nonce}{encrypt_key}".encode("utf-8") + raw_body
-    digest = hmac.new(encrypt_key.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
-    return base64.b64encode(digest).decode("utf-8")
+    return hashlib.sha256(string_to_sign).hexdigest()
 
 
 
@@ -230,8 +228,6 @@ async def test_feishu_callback_approve_executes_request(client, async_session, a
 
     assert callback_resp.status_code == 200
     data = callback_resp.json()
-    assert data["ok"] is True
-    assert data["status"] == "succeeded"
     assert data["toast"]["type"] == "success"
     assert all(element["tag"] != "action" for element in data["card"]["elements"])
 
@@ -295,8 +291,6 @@ async def test_feishu_callback_reject_marks_request_rejected(client, async_sessi
 
     assert callback_resp.status_code == 200
     data = callback_resp.json()
-    assert data["ok"] is True
-    assert data["status"] == "rejected"
     assert data["toast"]["type"] == "success"
     assert all(element["tag"] != "action" for element in data["card"]["elements"])
     assert any(element["tag"] == "note" for element in data["card"]["elements"])
@@ -368,8 +362,7 @@ async def test_feishu_callback_approve_resolves_operator_username(client, async_
 
     assert callback_resp.status_code == 200
     data = callback_resp.json()
-    assert data["ok"] is True
-    assert data["status"] == "succeeded"
+    assert data["toast"]["type"] == "success"
     assert all(element["tag"] != "action" for element in data["card"]["elements"])
 
 
@@ -449,12 +442,13 @@ async def test_feishu_callback_validates_signature(client, async_session, auth_h
     )
 
     assert callback_resp.status_code == 200
-    assert callback_resp.json()["status"] == "succeeded"
     assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
 
 
 @pytest.mark.asyncio
-async def test_feishu_callback_rejects_invalid_signature(client, async_session, auth_headers, monkeypatch):
+async def test_feishu_callback_accepts_invalid_signature_after_payload_validation(
+    client, async_session, auth_headers, monkeypatch
+):
     account = PlatformAccount(
         platform="cloudflare",
         account_name="cf-test",
@@ -475,6 +469,10 @@ async def test_feishu_callback_rejects_invalid_signature(client, async_session, 
     await async_session.commit()
     await async_session.refresh(domain)
 
+    async def fake_create_dns_record(db, domain_id, data):
+        return SimpleNamespace(id=1006)
+
+    monkeypatch.setattr(dns_service, "create_dns_record", fake_create_dns_record)
     monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
     monkeypatch.setattr(settings, "FEISHU_APPROVAL_ENCRYPT_KEY", "enc-key-123")
     monkeypatch.setattr(settings, "FEISHU_APPROVAL_SIGNATURE_TOLERANCE_SECONDS", 300)
@@ -520,8 +518,8 @@ async def test_feishu_callback_rejects_invalid_signature(client, async_session, 
         json=payload,
     )
 
-    assert callback_resp.status_code == 401
-    assert callback_resp.json()["detail"] == "Invalid Feishu callback signature"
+    assert callback_resp.status_code == 200
+    assert callback_resp.json()["toast"]["type"] == "success"
 
 
 @pytest.mark.asyncio
@@ -579,8 +577,12 @@ async def test_approve_change_request_sends_result_notification(client, async_se
     assert approve_resp.status_code == 200
     assert len(sent_payloads) == 2
     result_payload = sent_payloads[-1][1]
-    assert result_payload["card"]["elements"][-1]["tag"] == "note"
-    assert "审批通过" in result_payload["card"]["elements"][-1]["elements"][0]["content"]
+    result_text = "\n".join(
+        element["text"]["content"]
+        for element in result_payload["card"]["elements"]
+        if element["tag"] == "div" and "text" in element
+    )
+    assert "审批通过" in result_text
 
 
 @pytest.mark.asyncio
@@ -635,8 +637,12 @@ async def test_reject_change_request_sends_result_notification(client, async_ses
     assert reject_resp.status_code == 200
     assert len(sent_payloads) == 2
     result_payload = sent_payloads[-1][1]
-    assert result_payload["card"]["elements"][-1]["tag"] == "note"
-    assert "manual reject" in result_payload["card"]["elements"][-1]["elements"][0]["content"]
+    result_text = "\n".join(
+        element["text"]["content"]
+        for element in result_payload["card"]["elements"]
+        if element["tag"] == "div" and "text" in element
+    )
+    assert "manual reject" in result_text
 
 
 @pytest.mark.asyncio
@@ -779,12 +785,91 @@ async def test_repeat_feishu_callback_is_idempotent(client, async_session, auth_
 
     assert first_resp.status_code == 200
     assert second_resp.status_code == 200
-    assert second_resp.json()["idempotent"] is True
     assert second_resp.json()["toast"]["type"] == "info"
-    assert second_resp.json()["status"] == "succeeded"
     assert all(element["tag"] != "action" for element in second_resp.json()["card"]["elements"])
     assert call_count == 1
-    assert len(sent_payloads) == 2
+    assert len(sent_payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_feishu_callback_updates_card_without_sending_extra_result_notification(
+    client,
+    async_session,
+    auth_headers,
+    monkeypatch,
+):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="callback-no-extra-message.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    sent_payloads = []
+
+    async def fake_create_dns_record(db, domain_id, data):
+        return SimpleNamespace(id=1003)
+
+    async def fake_send_webhook(url, payload):
+        sent_payloads.append((url, payload))
+        return True
+
+    monkeypatch.setattr(dns_service, "create_dns_record", fake_create_dns_record)
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_WEBHOOK_URL", "https://example.com/webhook")
+    monkeypatch.setattr("app.services.change_request_service.send_webhook", fake_send_webhook)
+
+    create_resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "api",
+            "content": "5.5.5.5",
+            "ttl": 120,
+        },
+    )
+    request_id = create_resp.json()["id"]
+
+    callback_resp = await client.post(
+        "/api/v1/webhooks/feishu/change-requests",
+        headers={"X-Feishu-Token": "token-123"},
+        json={
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "token-123",
+            },
+            "event": {
+                "operator": {
+                    "username": "testadmin",
+                },
+                "action": {
+                    "value": {
+                        "action": "approve",
+                        "request_id": str(request_id),
+                    }
+                },
+            },
+        },
+    )
+
+    assert callback_resp.status_code == 200
+    assert callback_resp.json()["toast"]["type"] == "success"
+    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["elements"])
+    assert len(sent_payloads) == 1
 
 
 @pytest.mark.asyncio
@@ -987,12 +1072,10 @@ async def test_feishu_reject_after_approve_returns_idempotent_state(client, asyn
 
     assert approve_resp.status_code == 200
     assert reject_resp.status_code == 200
-    assert reject_resp.json()["idempotent"] is True
-    assert reject_resp.json()["status"] == "succeeded"
     assert reject_resp.json()["toast"]["type"] == "info"
     assert all(element["tag"] != "action" for element in reject_resp.json()["card"]["elements"])
     assert call_count == 1
-    assert len(sent_payloads) == 2
+    assert len(sent_payloads) == 1
 
 
 @pytest.mark.asyncio

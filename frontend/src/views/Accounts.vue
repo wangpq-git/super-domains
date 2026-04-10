@@ -242,11 +242,14 @@ async function handleSync(row: any) {
   try {
     ElMessage.info('开始同步...')
     const { data } = await syncAccount(row.id)
-    const count = data.domain_count ?? data.domains?.length ?? 0
+    if (data.status && data.status !== 'success') {
+      throw new Error(data.error || '同步失败')
+    }
+    const count = data.synced ?? data.domain_count ?? data.domains?.length ?? 0
     ElMessage.success(`同步完成，共 ${count} 个域名`)
     store.fetchAccounts()
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.message || '同步失败')
+    ElMessage.error(e.response?.data?.detail || e.response?.data?.message || e.message || '同步失败')
   }
 }
 

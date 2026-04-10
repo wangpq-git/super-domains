@@ -34,6 +34,10 @@ class DynadotAdapter(BasePlatformAdapter):
             except Exception as e:
                 logger.error(f"Dynadot API JSON parse error: {e}, response: {response.text[:200]}")
                 return False
+            api_error = self._extract_api_error(data)
+            if api_error:
+                logger.error(f"Dynadot authentication failed: {api_error}")
+                return False
             # Dynadot returns various response codes; check for success
             if isinstance(data, dict):
                 return data.get("status_code", 0) == 200 or "domain" in data.get("data", {})
@@ -56,6 +60,9 @@ class DynadotAdapter(BasePlatformAdapter):
             data = response.json()
         except Exception as e:
             raise RuntimeError(f"Dynadot API JSON parse error: {e}, response: {response.text[:200]}")
+        api_error = self._extract_api_error(data)
+        if api_error:
+            raise RuntimeError(f"Dynadot API error: {api_error}")
         return self._parse_domain_list(data)
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
@@ -68,16 +75,15 @@ class DynadotAdapter(BasePlatformAdapter):
         if not isinstance(response_data, dict):
             return domains
 
-        domain_data = response_data.get("MainDomains", [])
+        domain_data = self._extract_domain_items(response_data)
         if not domain_data:
-            domain_data = response_data.get("data", {}).get("domain", [])
+            domain_data = self._extract_domain_items(data)
         if not domain_data:
-            domain_data = data.get("data", {}).get("domain", [])
-        if not domain_data:
-            domain_data = data.get("domain", [])
-
-        if not isinstance(domain_data, list):
-            domain_data = [domain_data] if domain_data else []
+            logger.warning(
+                "Dynadot list_domain returned 0 parseable domains; response keys=%s nested keys=%s",
+                list(data.keys()),
+                list(response_data.keys()),
+            )
 
         for item in domain_data:
             if not isinstance(item, dict):
@@ -147,6 +153,77 @@ class DynadotAdapter(BasePlatformAdapter):
                 logger.warning(f"Failed to parse Dynadot domain item: {item}, error: {e}")
                 continue
         return domains
+
+    def _extract_domain_items(self, payload: Any) -> List[dict]:
+        if not payload:
+            return []
+
+        candidate_keys = (
+            "MainDomains",
+            "domain",
+            "domains",
+            "Domain",
+            "DomainInfo",
+            "DomainList",
+        )
+
+        if isinstance(payload, list):
+            flattened = []
+            for item in payload:
+                if isinstance(item, dict) and any(
+                    key in item for key in ("Name", "domain_name", "name")
+                ):
+                    flattened.append(item)
+                else:
+                    flattened.extend(self._extract_domain_items(item))
+            return flattened
+
+        if not isinstance(payload, dict):
+            return []
+
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                nested = self._extract_domain_items(value)
+                if nested:
+                    return nested
+
+        nested_data = payload.get("data")
+        if isinstance(nested_data, (dict, list)):
+            nested = self._extract_domain_items(nested_data)
+            if nested:
+                return nested
+
+        if any(key in payload for key in ("Name", "domain_name", "name")):
+            return [payload]
+
+        flattened = []
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                flattened.extend(self._extract_domain_items(value))
+        return flattened
+
+    def _extract_api_error(self, data: Any) -> Optional[str]:
+        if not isinstance(data, dict):
+            return None
+
+        response = data.get("Response")
+        if isinstance(response, dict):
+            error = response.get("Error") or response.get("error")
+            code = response.get("ResponseCode") or response.get("response_code")
+            if error:
+                return f"{error} (code: {code})" if code is not None else str(error)
+
+        error = data.get("error") or data.get("Error") or data.get("error_message")
+        if error:
+            code = data.get("status_code") or data.get("code") or data.get("ResponseCode")
+            if code is not None:
+                return f"{error} (code: {code})"
+            return str(error)
+
+        return None
 
     def _parse_date(self, date_val) -> Optional[datetime]:
         """Parse date value defensively — handles both timestamps (ms) and date strings"""

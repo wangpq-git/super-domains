@@ -70,6 +70,13 @@ async def get_account(db: AsyncSession, account_id: int) -> PlatformAccount | No
     return result.scalar_one_or_none()
 
 
+async def get_account_domain_count(db: AsyncSession, account_id: int) -> int:
+    result = await db.execute(
+        select(func.count(Domain.id)).where(Domain.account_id == account_id)
+    )
+    return result.scalar_one() or 0
+
+
 async def update_account(db: AsyncSession, account_id: int, data: PlatformAccountUpdate) -> PlatformAccount | None:
     account = await get_account(db, account_id)
     if not account:

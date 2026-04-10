@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -98,6 +99,112 @@ async def send_webhook(url: str, payload: dict) -> bool:
             return True
     except Exception as e:
         logger.error("Failed to send webhook to %s: %s", url, e)
+        return False
+
+
+async def fetch_feishu_tenant_access_token(app_id: str, app_secret: str) -> str | None:
+    if not app_id or not app_secret:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.error(
+                    "Failed to fetch Feishu tenant access token: code=%s msg=%s",
+                    data.get("code"),
+                    data.get("msg"),
+                )
+                return None
+            return data.get("tenant_access_token")
+    except Exception as exc:
+        logger.error("Failed to fetch Feishu tenant access token: %s", exc)
+        return None
+
+
+async def send_feishu_bot_interactive_message(
+    *,
+    app_id: str,
+    app_secret: str,
+    chat_id: str,
+    card: dict,
+) -> str | None:
+    token = await fetch_feishu_tenant_access_token(app_id, app_secret)
+    if not token:
+        return None
+
+    payload = {
+        "receive_id": chat_id,
+        "msg_type": "interactive",
+        "content": json.dumps(card, ensure_ascii=False),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages",
+                params={"receive_id_type": "chat_id"},
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.error(
+                    "Feishu bot message business error: code=%s msg=%s payload=%s",
+                    data.get("code"),
+                    data.get("msg"),
+                    payload,
+                )
+                return None
+            logger.info("Feishu bot message sent to chat_id=%s", chat_id)
+            return data.get("data", {}).get("message_id")
+    except Exception as exc:
+        logger.error("Failed to send Feishu bot message to chat_id=%s: %s", chat_id, exc)
+        return None
+
+
+async def update_feishu_bot_interactive_message(
+    *,
+    app_id: str,
+    app_secret: str,
+    message_id: str,
+    card: dict,
+) -> bool:
+    token = await fetch_feishu_tenant_access_token(app_id, app_secret)
+    if not token or not message_id:
+        return False
+
+    payload = {
+        "content": json.dumps(card, ensure_ascii=False),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.patch(
+                f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.error(
+                    "Feishu bot update business error: code=%s msg=%s message_id=%s",
+                    data.get("code"),
+                    data.get("msg"),
+                    message_id,
+                )
+                return False
+            logger.info("Feishu bot message updated: message_id=%s", message_id)
+            return True
+    except Exception as exc:
+        logger.error("Failed to update Feishu bot message=%s: %s", message_id, exc)
         return False
 
 
