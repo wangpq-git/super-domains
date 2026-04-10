@@ -75,6 +75,9 @@ def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int
             )
             domain_response = bucket_client.get_bucket_domain(Bucket=bucket_name)
         except Exception as exc:  # pragma: no cover
+            message = str(exc)
+            if "AccessDenied" in message or "Access Denied" in message:
+                continue
             raise RuntimeError(f"读取存储桶 {bucket_name} 的自定义域名失败: {exc}") from exc
 
         for rule in _ensure_list((domain_response or {}).get("DomainRule")):

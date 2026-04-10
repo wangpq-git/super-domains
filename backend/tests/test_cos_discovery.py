@@ -80,3 +80,52 @@ async def test_cos_discovery_domains_requires_credentials(client, auth_headers):
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "请先在配置中心填写腾讯云 SecretId 和 SecretKey"
+
+
+def test_list_cos_domains_sync_skips_access_denied_bucket(monkeypatch):
+    class FakeClient:
+        def __init__(self, config):
+            self.region = getattr(config, "_region", None)
+
+        def list_buckets(self):
+            return {
+                "Buckets": {
+                    "Bucket": [
+                        {"Name": "denied-bucket", "Location": "ap-singapore"},
+                        {"Name": "allowed-bucket", "Location": "ap-singapore"},
+                    ]
+                }
+            }
+
+        def get_bucket_domain(self, Bucket):
+            if Bucket == "denied-bucket":
+                raise Exception("{'code': 'AccessDenied', 'message': 'Access Denied.'}")
+            return {
+                "DomainRule": [
+                    {"Name": "s3.example.com", "Type": "WEBSITE"}
+                ]
+            }
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self._region = kwargs.get("Region")
+
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules,
+        "qcloud_cos",
+        types.SimpleNamespace(CosConfig=FakeConfig, CosS3Client=FakeClient),
+    )
+
+    items = cos_discovery_service._list_cos_domains_sync("sid", "skey", 10)
+
+    assert items == [
+        {
+            "bucket_name": "allowed-bucket",
+            "custom_domain": "s3.example.com",
+            "origin_type": "静态网站源站",
+            "cname": "allowed-bucket.cos-website.ap-singapore.myqcloud.com",
+        }
+    ]
