@@ -1,13 +1,51 @@
 <template>
-  <div class="alerts-container">
-    <el-card shadow="never">
+  <div class="alerts-container page-stack">
+    <PageHero
+      eyebrow="RISK AUTOMATION"
+      title="告警规则"
+      subtitle="统一管理到期提醒策略、通知渠道和手动检查入口，避免高风险域名漏报。"
+      tone="gold"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>启用 {{ enabledRuleCount }} / {{ rules.length }}</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>规则 {{ rules.length }}</span>
+        <span>临期域名 {{ expiringTotal }}</span>
+        <span>检查窗口 {{ expiringDays }} 天</span>
+      </div>
+      <template #actions>
+        <el-button type="warning" :icon="Bell" :loading="checking" @click="handleCheck">手动检查</el-button>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">添加规则</el-button>
+      </template>
+    </PageHero>
+
+    <section class="page-grid-3">
+      <el-card shadow="never" class="overview-card">
+        <p class="overview-label">已启用规则</p>
+        <strong class="overview-value">{{ enabledRuleCount }}</strong>
+        <span class="overview-hint">优先检查高等级和自动触发规则是否覆盖关键平台。</span>
+      </el-card>
+      <el-card shadow="never" class="overview-card">
+        <p class="overview-label">手动检查</p>
+        <strong class="overview-value">{{ checking ? '执行中' : '可执行' }}</strong>
+        <span class="overview-hint">用于在部署或配置修改后立即验证通知链路。</span>
+      </el-card>
+      <el-card shadow="never" class="overview-card">
+        <p class="overview-label">临期域名</p>
+        <strong class="overview-value">{{ expiringTotal }}</strong>
+        <span class="overview-hint">当前查询窗口内的到期域名总量。</span>
+      </el-card>
+    </section>
+
+    <el-card shadow="never" class="data-card">
       <template #header>
         <div class="card-header">
-          <span>告警规则管理</span>
           <div>
-            <el-button type="warning" :icon="Bell" :loading="checking" @click="handleCheck">手动检查</el-button>
-            <el-button type="primary" :icon="Plus" @click="openDialog()">添加规则</el-button>
+            <span>规则列表</span>
+            <p class="card-subtitle">覆盖通知频率、渠道和适用范围，建议避免重复规则造成提醒噪声。</p>
           </div>
+          <el-tag type="info" effect="plain">共 {{ rules.length }} 条</el-tag>
         </div>
       </template>
 
@@ -64,8 +102,13 @@
       </el-table>
     </el-card>
 
-    <el-card shadow="never" style="margin-top: 16px">
-      <template #header><span>即将到期域名</span></template>
+    <el-card shadow="never" class="data-card">
+      <template #header>
+        <div>
+          <span>即将到期域名</span>
+          <p class="card-subtitle">按剩余天数快速查看风险分布，可结合规则策略确认是否需要提早提醒。</p>
+        </div>
+      </template>
       <el-form :inline="true" style="margin-bottom: 12px">
         <el-form-item label="查询天数">
           <el-input-number v-model="expiringDays" :min="1" :max="365" @change="fetchExpiring" />
@@ -189,9 +232,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { Plus, Edit, Delete, Bell } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import type { FormInstance } from 'element-plus'
 import {
   getAlertRules,
@@ -234,6 +278,7 @@ const defaultForm = {
 }
 
 const form = reactive({ ...defaultForm })
+const enabledRuleCount = computed(() => rules.value.filter((rule) => rule.is_enabled).length)
 
 const formRules = {
   name: [{ required: true, message: '请输入规则名称', trigger: 'blur' }],
@@ -419,17 +464,62 @@ onMounted(() => {
 <style scoped>
 .alerts-container {
   width: 100%;
-  padding-bottom: 20px;
 }
+
+.hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.overview-card {
+  min-height: 148px;
+}
+
+.overview-label {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.overview-value {
+  display: block;
+  margin-top: 16px;
+  font-size: 28px;
+  color: #0f172a;
+}
+
+.overview-hint {
+  display: block;
+  margin-top: 12px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+
 .card-header span {
   font-size: 18px;
   font-weight: 600;
 }
+
+.card-subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #8a94a6;
+}
+
 .days-safe { color: #67c23a; font-weight: 600; }
 .days-warning { color: #e6a23c; font-weight: 600; }
 .days-danger { color: #f56c6c; font-weight: 600; }

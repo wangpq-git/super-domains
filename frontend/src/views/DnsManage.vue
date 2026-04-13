@@ -1,6 +1,28 @@
 <template>
-  <div class="dns-manage">
-    <el-card shadow="never" class="selector-card">
+  <div class="dns-manage page-stack">
+    <PageHero
+      eyebrow="DNS WORKBENCH"
+      title="DNS 管理"
+      subtitle="面向 Cloudflare 域名的记录维护台，适合快速同步、检查与变更单执行后的复核。"
+      tone="slate"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>{{ selectedDomainLabel }}</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>记录 {{ records.length }}</span>
+        <span>已同步 {{ syncedCount }}</span>
+        <span>可编辑 {{ authStore.isAdmin ? '是' : '否' }}</span>
+      </div>
+    </PageHero>
+
+    <el-card shadow="never" class="selector-card data-card">
+      <template #header>
+        <div>
+          <h3 class="section-title">选择域名</h3>
+          <p class="section-subtitle">先检索并选中域名，再进行同步或记录编辑；当前仅支持 Cloudflare 域名。</p>
+        </div>
+      </template>
       <el-form :inline="true">
         <el-form-item label="选择域名">
           <el-select
@@ -36,7 +58,16 @@
       </el-form>
     </el-card>
 
-    <el-card shadow="never" style="margin-top: 16px">
+    <el-card shadow="never" class="data-card">
+      <template #header>
+        <div class="table-toolbar">
+          <div>
+            <h3 class="section-title">DNS 记录</h3>
+            <p class="section-subtitle">按类型、名称和内容查看记录，异常状态会直接显示在表格中。</p>
+          </div>
+          <el-tag type="info" effect="plain">{{ selectedDomainId ? `${records.length} 条记录` : '尚未选择域名' }}</el-tag>
+        </div>
+      </template>
       <template v-if="selectedDomainId">
         <el-table v-if="records.length > 0 || loading" v-loading="loading" :data="records" stripe style="width: 100%" @sort-change="handleSortChange">
           <el-table-column prop="record_type" label="类型" width="90" sortable="custom">
@@ -117,6 +148,7 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import type { FormInstance } from 'element-plus'
 import { getDomains } from '@/api/domains'
 import {
@@ -151,6 +183,11 @@ const defaultForm = { record_type: 'A', name: '', content: '', ttl: 3600, priori
 const form = ref({ ...defaultForm })
 
 const showPriority = computed(() => ['MX', 'SRV'].includes(form.value.record_type))
+const selectedDomainLabel = computed(() => {
+  const matched = domainList.value.find((item) => item.id === selectedDomainId.value)
+  return matched?.domain_name || '尚未选择域名'
+})
+const syncedCount = computed(() => records.value.filter((record) => record.sync_status === 'synced').length)
 
 const rules = {
   record_type: [{ required: true, message: '请选择记录类型', trigger: 'change' }],
@@ -335,7 +372,19 @@ onMounted(async () => {
 }
 
 .selector-card {
-  margin-bottom: 0;
+  border-radius: 18px !important;
+}
+
+.hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.selector-card :deep(.el-form-item) {
+  margin-bottom: 10px;
 }
 
 :deep(.el-empty) {
