@@ -65,8 +65,8 @@
                   :value="size"
                 />
               </el-select>
-              <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
-              <el-button type="primary" :loading="loading" :disabled="!configured" @click="loadDomains">
+              <el-button :loading="loadingConfig" @click="loadConfig(true)">刷新配置</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!configured" @click="loadDomains(true)">
                 查询 COS
               </el-button>
               <el-button
@@ -161,10 +161,10 @@ function handlePageSizeChange() {
   currentPage.value = 1
 }
 
-async function loadConfig() {
+async function loadConfig(force = false) {
   loadingConfig.value = true
   try {
-    const { data } = await getCosDiscoveryConfig()
+    const { data } = await getCosDiscoveryConfig(force)
     configured.value = data.configured
     if (!configured.value) {
       domainItems.value = []
@@ -179,10 +179,10 @@ async function loadConfig() {
   }
 }
 
-async function loadDomains() {
+async function loadDomains(force = false) {
   loading.value = true
   try {
-    const { data } = await getCosDomains()
+    const { data } = await getCosDomains(force)
     domainItems.value = data.items || []
     skippedBucketCount.value = data.skipped_bucket_count || 0
     keyword.value = ''

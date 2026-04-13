@@ -259,7 +259,7 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 }
 
 function handleRefresh() {
-  store.fetchAccounts()
+  store.fetchAccounts(true)
 }
 
 function syncStatusType(status?: string) {

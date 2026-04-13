@@ -1,4 +1,4 @@
-import request from './request'
+import request, { cachedGet, invalidateCache } from './request'
 
 export interface SystemSettingItem {
   key: string
@@ -20,10 +20,11 @@ export interface SystemSettingListResponse {
   items: SystemSettingItem[]
 }
 
-export function getSystemSettings() {
-  return request.get<SystemSettingListResponse>('/system-settings')
+export function getSystemSettings(force = false) {
+  return cachedGet<SystemSettingListResponse>('/system-settings', { ttl: 60_000, force })
 }
 
 export function updateSystemSettings(items: Array<{ key: string; value: any }>) {
+  invalidateCache('/system-settings')
   return request.put<SystemSettingListResponse>('/system-settings', { items })
 }

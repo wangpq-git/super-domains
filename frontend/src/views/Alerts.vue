@@ -334,10 +334,10 @@ function daysClass(days: number): string {
   return 'days-safe'
 }
 
-async function fetchRules() {
+async function fetchRules(force = false) {
   loading.value = true
   try {
-    const { data } = await getAlertRules()
+    const { data } = await getAlertRules(force)
     rules.value = data ?? []
   } catch {
     rules.value = []
@@ -346,9 +346,9 @@ async function fetchRules() {
   }
 }
 
-async function fetchExpiring() {
+async function fetchExpiring(force = false) {
   try {
-    const { data } = await getExpiringDomains(expiringDays.value, expiringPage.value, expiringPageSize.value)
+    const { data } = await getExpiringDomains(expiringDays.value, expiringPage.value, expiringPageSize.value, force)
     expiringDomains.value = data.items ?? []
     expiringTotal.value = data.total ?? 0
   } catch {

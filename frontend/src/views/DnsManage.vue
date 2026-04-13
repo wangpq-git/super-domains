@@ -51,7 +51,7 @@
           <el-tag type="warning" effect="light">当前仅支持修改 Cloudflare 域名</el-tag>
         </el-form-item>
         <el-form-item>
-          <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords" />
+          <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords(true)" />
           <el-button type="primary" :icon="Refresh" :loading="syncing" :disabled="!selectedDomainId" @click="handleSync">同步记录</el-button>
           <el-button v-if="authStore.isAdmin" type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
         </el-form-item>
@@ -209,7 +209,7 @@ function recordTypeTag(type: string): '' | 'success' | 'warning' | 'danger' | 'i
   return map[type] ?? ''
 }
 
-async function fetchDomains(search?: string) {
+async function fetchDomains(search?: string, force = false) {
   try {
     const params: any = {
       page: 1,
@@ -219,7 +219,7 @@ async function fetchDomains(search?: string) {
       platform: 'cloudflare',
     }
     if (search) params.search = search
-    const { data } = await getDomains(params)
+    const { data } = await getDomains(params, force)
     domainList.value = data.items ?? data.data ?? []
   } catch {
     domainList.value = []
@@ -239,11 +239,11 @@ async function handleSearch(query: string) {
   }
 }
 
-async function fetchRecords() {
+async function fetchRecords(force = false) {
   if (!selectedDomainId.value) return
   loading.value = true
   try {
-    const { data } = await getDnsRecords(selectedDomainId.value, { sort_by: dnsSortBy.value, sort_order: dnsSortOrder.value })
+    const { data } = await getDnsRecords(selectedDomainId.value, { sort_by: dnsSortBy.value, sort_order: dnsSortOrder.value }, force)
     records.value = data ?? []
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '获取DNS记录失败')
@@ -261,7 +261,7 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
     dnsSortBy.value = 'record_type'
     dnsSortOrder.value = 'asc'
   }
-  fetchRecords()
+  fetchRecords(true)
 }
 
 function handleDomainChange() {
@@ -281,7 +281,7 @@ async function handleSync() {
     } else {
       ElMessage.success(`同步完成：更新 ${data.upserted} 条，移除 ${data.removed} 条`)
     }
-    await fetchRecords()
+    await fetchRecords(true)
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '同步失败')
   } finally {
@@ -329,7 +329,7 @@ async function handleSubmit() {
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
-    await fetchRecords()
+    await fetchRecords(true)
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '操作失败')
   } finally {
@@ -341,7 +341,7 @@ async function handleDelete(row: DnsRecord) {
   try {
     await deleteDnsRecord(row.id)
     ElMessage.success('删除成功')
-    await fetchRecords()
+    await fetchRecords(true)
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '删除失败')
   }
