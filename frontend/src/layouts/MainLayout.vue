@@ -3,7 +3,15 @@
     <el-aside :width="isCollapse ? '78px' : '248px'" class="aside">
       <div class="logo">
         <div class="logo-icon">
-          <el-icon :size="20" color="#fff"><Monitor /></el-icon>
+          <div class="logo-mark" aria-hidden="true">
+            <span class="logo-orbit logo-orbit--outer"></span>
+            <span class="logo-orbit logo-orbit--inner"></span>
+            <span class="logo-node logo-node--top"></span>
+            <span class="logo-node logo-node--right"></span>
+            <span class="logo-node logo-node--bottom"></span>
+            <span class="logo-node logo-node--left"></span>
+            <span class="logo-core"></span>
+          </div>
         </div>
         <div v-show="!isCollapse" class="logo-copy">
           <span class="logo-text">域名管理平台</span>
@@ -128,7 +136,6 @@ import {
   Expand,
   Files,
   Fold,
-  Monitor,
   Setting,
   Share,
   SwitchButton,
@@ -213,12 +220,83 @@ const currentDateLabel = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #4361ee 0%, #6c83f2 100%);
-  box-shadow: 0 8px 20px rgba(67, 97, 238, 0.35);
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.28), transparent 36%),
+    linear-gradient(145deg, #3b82f6 0%, #4f46e5 45%, #1d4ed8 100%);
+  box-shadow:
+    0 10px 20px rgba(37, 99, 235, 0.28),
+    inset 0 1px 1px rgba(255, 255, 255, 0.25);
   flex-shrink: 0;
+}
+
+.logo-mark {
+  position: relative;
+  width: 22px;
+  height: 22px;
+}
+
+.logo-orbit,
+.logo-core,
+.logo-node {
+  position: absolute;
+  inset: 0;
+}
+
+.logo-orbit {
+  border-radius: 999px;
+  border: 1.2px solid rgba(255, 255, 255, 0.88);
+}
+
+.logo-orbit--outer {
+  transform: rotate(18deg);
+}
+
+.logo-orbit--inner {
+  inset: 4px;
+  border-color: rgba(191, 219, 254, 0.95);
+  transform: rotate(-18deg);
+}
+
+.logo-core {
+  inset: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+}
+
+.logo-node {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #dbeafe;
+  box-shadow: 0 0 8px rgba(219, 234, 254, 0.7);
+}
+
+.logo-node--top {
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.logo-node--right {
+  top: 50%;
+  right: -1px;
+  transform: translateY(-50%);
+}
+
+.logo-node--bottom {
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.logo-node--left {
+  top: 50%;
+  left: -1px;
+  transform: translateY(-50%);
 }
 
 .logo-copy {
