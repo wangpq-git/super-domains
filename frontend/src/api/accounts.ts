@@ -7,22 +7,29 @@ export interface AccountData {
   config?: Record<string, any>
 }
 
+function invalidateAccountRelatedCache() {
+  invalidateCache('/platforms')
+  invalidateCache('/domains')
+  invalidateCache('/reports')
+  invalidateCache('/alerts/expiring')
+}
+
 export function getAccounts(params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number }, force = false) {
   return cachedGet('/platforms', { params, force, ttl: 30_000 })
 }
 
 export function createAccount(data: any) {
-  invalidateCache('/platforms')
+  invalidateAccountRelatedCache()
   return request.post('/platforms', data)
 }
 
 export function updateAccount(id: number, data: any) {
-  invalidateCache('/platforms')
+  invalidateAccountRelatedCache()
   return request.put(`/platforms/${id}`, data)
 }
 
 export function deleteAccount(id: number) {
-  invalidateCache('/platforms')
+  invalidateAccountRelatedCache()
   return request.delete(`/platforms/${id}`)
 }
 
@@ -31,11 +38,11 @@ export function testAccount(id: number) {
 }
 
 export function syncAccount(id: number) {
-  invalidateCache('/platforms')
+  invalidateAccountRelatedCache()
   return request.post(`/platforms/${id}/sync`)
 }
 
 export function syncAllAccounts() {
-  invalidateCache('/platforms')
+  invalidateAccountRelatedCache()
   return request.post('/platforms/sync-all', null, { timeout: 300000 })
 }

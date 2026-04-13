@@ -19,10 +19,26 @@ type CachedGetOptions = AxiosRequestConfig & {
 }
 
 const memoryCache = new Map<string, CacheEntry>()
+const inflightRequests = new Map<string, Promise<AxiosResponse<any>>>()
 const CACHE_PREFIX = 'sdm-cache:'
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
+  return `{${entries.join(',')}}`
+}
+
 function buildCacheKey(url: string, config?: AxiosRequestConfig) {
-  const params = config?.params ? JSON.stringify(config.params) : ''
+  const params = config?.params ? stableStringify(config.params) : ''
   const base = config?.baseURL || request.defaults.baseURL || ''
   return `${base}:${url}:${params}`
 }
@@ -88,14 +104,28 @@ export async function cachedGet<T = unknown>(url: string, config: CachedGetOptio
         config: requestConfig,
       } as AxiosResponse<T>
     }
+
+    const inflight = inflightRequests.get(key)
+    if (inflight) {
+      return inflight as Promise<AxiosResponse<T>>
+    }
   }
 
-  const response = await request.get<T>(url, requestConfig)
-  writeCache<T>(key, {
-    data: response.data,
-    expiresAt: Date.now() + ttl,
+  const pendingRequest = request.get<T>(url, requestConfig).then((response) => {
+    writeCache<T>(key, {
+      data: response.data,
+      expiresAt: Date.now() + ttl,
+    })
+    return response
   })
-  return response
+
+  inflightRequests.set(key, pendingRequest as Promise<AxiosResponse<any>>)
+
+  try {
+    return await pendingRequest
+  } finally {
+    inflightRequests.delete(key)
+  }
 }
 
 request.interceptors.request.use(
