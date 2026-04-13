@@ -1,229 +1,329 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from .base import BasePlatformAdapter, DomainInfo, DnsRecordInfo
 from . import register_adapter
 import logging
 import httpx
+import base64
 
 logger = logging.getLogger(__name__)
 
 
 @register_adapter('spaceship')
 class SpaceshipAdapter(BasePlatformAdapter):
-    """
-    Spaceship API adapter.
-
-    TODO: API documentation is unclear on the following points:
-    - Exact pagination format (offset-based vs cursor-based)
-    - Whether DNS zone must be activated before managing records
-    - Rate limiting headers and retry-after behavior
-    - Exact error response format for 4xx/5xx
-    """
     BASE_URL = "https://spaceship.dev/api/v1"
+    _AUTH_PROBE_LIMIT = 1
 
     def __init__(self, credentials: dict):
         super().__init__(credentials)
         self.api_key = credentials.get("api_key", "")
         self.api_secret = credentials.get("api_secret", "")
+        if not self.api_key or not self.api_secret:
+            raise ValueError("Spaceship requires 'api_key' and 'api_secret'")
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
+        self._auth_mode: Optional[str] = None
 
     async def _get_authenticated_client(self) -> httpx.AsyncClient:
-        """Get client with auth headers, ensuring token is valid"""
         await self._ensure_authenticated()
         client = self.client
-        if self._access_token:
-            client.headers["Authorization"] = f"Bearer {self._access_token}"
+        self._apply_auth_headers(client)
         return client
 
-    async def _ensure_authenticated(self) -> bool:
-        """Check token validity and refresh if needed"""
-        if self._access_token and self._token_expires_at:
-            if datetime.now() < self._token_expires_at:
-                return True
-            logger.info("Spaceship token expired, refreshing...")
+    def _clear_auth_headers(self, client: httpx.AsyncClient) -> None:
+        client.headers.pop("Authorization", None)
+        client.headers.pop("X-Api-Key", None)
+        client.headers.pop("X-Api-Secret", None)
 
-        return await self.authenticate()
+    def _apply_auth_headers(self, client: httpx.AsyncClient) -> None:
+        self._clear_auth_headers(client)
+        if self._auth_mode == "bearer" and self._access_token:
+            client.headers["Authorization"] = f"Bearer {self._access_token}"
+        elif self._auth_mode == "header":
+            client.headers["X-Api-Key"] = self.api_key
+            client.headers["X-Api-Secret"] = self.api_secret
+        elif self._auth_mode == "basic":
+            credentials = base64.b64encode(f"{self.api_key}:{self.api_secret}".encode()).decode()
+            client.headers["Authorization"] = f"Basic {credentials}"
+
+    async def _ensure_authenticated(self) -> None:
+        if self._auth_mode == "bearer" and self._access_token and self._token_expires_at:
+            if datetime.utcnow() < self._token_expires_at:
+                return
+            logger.info("Spaceship token expired, refreshing")
+
+        if self._auth_mode in {"header", "basic"}:
+            return
+
+        authenticated = await self.authenticate()
+        if not authenticated:
+            raise RuntimeError("Spaceship authentication failed")
+
+    async def _request(self, method: str, path: str, *, params: dict | None = None, json: dict | None = None, data: dict | None = None, headers: dict | None = None, skip_auth: bool = False) -> Any:
+        client = self.client
+        if not skip_auth:
+            await self._ensure_authenticated()
+            self._apply_auth_headers(client)
+
+        request_headers = {"Accept": "application/json"}
+        if headers:
+            request_headers.update(headers)
+
+        response = await client.request(
+            method,
+            f"{self.BASE_URL}{path}",
+            params=params,
+            json=json,
+            data=data,
+            headers=request_headers,
+        )
+
+        if response.status_code >= 400:
+            raise RuntimeError(self._extract_error(response))
+
+        if not response.content:
+            return {}
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"Spaceship API returned invalid JSON for {path}") from exc
+
+    def _extract_error(self, response: httpx.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            body = response.text[:300].strip()
+            return f"Spaceship API error ({response.status_code}): {body or 'empty response'}"
+
+        message = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message") or error.get("description")
+            elif isinstance(error, str):
+                message = error
+            if not message:
+                message = payload.get("message") or payload.get("detail") or payload.get("description")
+
+        if not message:
+            message = str(payload)[:300]
+        return f"Spaceship API error ({response.status_code}): {message}"
+
+    async def _probe_auth_mode(self, mode: str) -> bool:
+        self._auth_mode = mode
+        self._apply_auth_headers(self.client)
+        response = await self.client.get(
+            f"{self.BASE_URL}/domains",
+            params={"page": 1, "per_page": self._AUTH_PROBE_LIMIT},
+            headers={"Accept": "application/json"},
+        )
+        if response.status_code < 400:
+            return True
+        if response.status_code in {401, 403, 404}:
+            return False
+        raise RuntimeError(self._extract_error(response))
 
     async def authenticate(self) -> bool:
-        """
-        Authenticate using API key and secret.
+        self._clear_auth_headers(self.client)
+        self._access_token = None
+        self._token_expires_at = None
+        self._auth_mode = None
 
-        TODO: Confirm the exact authentication endpoint and token format.
-        Current implementation assumes OAuth2-style token exchange.
-        """
         try:
-            # TODO: Verify if this is the correct auth endpoint
-            response = await self.client.post(
-                f"{self.BASE_URL}/auth/token",
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
+            token_data = await self._request(
+                "POST",
+                "/auth/token",
                 data={
                     "grant_type": "client_credentials",
                     "client_id": self.api_key,
-                    "client_secret": self.api_secret
-                }
+                    "client_secret": self.api_secret,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                skip_auth=True,
             )
-
-            if response.status_code == 404:
-                # Spaceship uses direct API key auth in headers
-                logger.info("Token endpoint not found, trying API key header auth")
-                self.client.headers["X-Api-Key"] = self.api_key
-                self.client.headers["X-Api-Secret"] = self.api_secret
-                # Verify by making a test request
-                test_response = await self.client.get(f"{self.BASE_URL}/domains", params={"limit": 1})
-                if test_response.status_code == 401:
-                    # Try Basic auth
-                    import base64
-                    credentials = base64.b64encode(f"{self.api_key}:{self.api_secret}".encode()).decode()
-                    self.client.headers.pop("X-Api-Key", None)
-                    self.client.headers.pop("X-Api-Secret", None)
-                    self.client.headers["Authorization"] = f"Basic {credentials}"
-                    test_response2 = await self.client.get(f"{self.BASE_URL}/domains", params={"limit": 1})
-                    test_response2.raise_for_status()
-                self._access_token = None  # Using header auth, no token needed
-                self._token_expires_at = None
+            token = token_data.get("access_token", token_data.get("token")) if isinstance(token_data, dict) else None
+            if token:
+                expires_in = token_data.get("expires_in", 3600) if isinstance(token_data, dict) else 3600
+                self._access_token = str(token)
+                self._token_expires_at = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=int(expires_in))
+                self._auth_mode = "bearer"
+                logger.info("Spaceship authentication successful via bearer token")
                 return True
+        except RuntimeError as exc:
+            if "(404)" not in str(exc):
+                logger.info("Spaceship bearer auth probe failed: %s", exc)
 
-            response.raise_for_status()
-            data = response.json()
-
-            if isinstance(data, dict):
-                token = data.get("access_token", data.get("token"))
-                expires_in = data.get("expires_in", 3600)
-
-                if token:
-                    self._access_token = token
-                    self._token_expires_at = datetime.now().replace(
-                        microsecond=0
-                    ) + __import__("datetime").timedelta(seconds=expires_in)
-                    logger.info("Spaceship authentication successful")
+        for mode in ("header", "basic"):
+            try:
+                if await self._probe_auth_mode(mode):
+                    self._auth_mode = mode
+                    logger.info("Spaceship authentication successful via %s auth", mode)
                     return True
+            except Exception as exc:
+                logger.info("Spaceship %s auth probe failed: %s", mode, exc)
 
-            logger.error("No token in Spaceship auth response")
-            return False
-        except Exception as e:
-            logger.error(f"Spaceship authentication failed: {e}")
-            return False
+        self._auth_mode = None
+        self._clear_auth_headers(self.client)
+        return False
 
-    async def list_domains(self, page: int = 1, limit: int = 50) -> List[DomainInfo]:
-        """
-        List all domains with pagination.
+    async def list_domains(self, page: int = 1, limit: int = 100) -> List[DomainInfo]:
+        all_domains = []
+        current_page = max(page, 1)
 
-        TODO: Confirm pagination parameters (offset/limit vs page/limit vs cursor)
-        """
-        try:
-            client = await self._get_authenticated_client()
+        while True:
+            data = await self._request(
+                "GET",
+                "/domains",
+                params={"page": current_page, "per_page": limit},
+            )
+            domains = self._parse_domain_list(data)
+            all_domains.extend(domains)
 
-            all_domains = []
-            offset = (page - 1) * limit
+            total = self._extract_total(data)
+            if total is not None and len(all_domains) >= total:
+                break
+            if len(domains) < limit:
+                break
+            current_page += 1
 
-            while True:
-                # TODO: Verify pagination parameter names
-                response = await client.get(
-                    f"{self.BASE_URL}/domains",
-                    params={
-                        "offset": offset,
-                        "limit": limit
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
+        return all_domains
 
-                domains = self._parse_domain_list(data)
-                all_domains.extend(domains)
-
-                # Check if there are more results
-                total = data.get("total", data.get("pagination", {}).get("total", 0))
-                if len(all_domains) >= total or len(domains) < limit:
-                    break
-
-                offset += limit
-
-            return all_domains
-        except Exception as e:
-            logger.error(f"Failed to list Spaceship domains: {e}")
-            raise
+    def _extract_total(self, data: Any) -> Optional[int]:
+        if not isinstance(data, dict):
+            return None
+        for container in (data, data.get("pagination", {}), data.get("meta", {})):
+            if isinstance(container, dict):
+                value = container.get("total")
+                if isinstance(value, int):
+                    return value
+                if isinstance(value, str) and value.isdigit():
+                    return int(value)
+        return None
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
-        """Parse Spaceship domain list response defensively"""
         domains = []
         if not isinstance(data, dict):
             return domains
 
-        # Spaceship typically returns data under 'data', 'domains', or 'results'
         domain_data = data.get("data", data.get("domains", data.get("results", data.get("items", []))))
+        if isinstance(domain_data, dict):
+            if isinstance(domain_data.get("items"), list):
+                domain_data = domain_data["items"]
+            elif isinstance(domain_data.get("results"), list):
+                domain_data = domain_data["results"]
+            else:
+                domain_data = [domain_data]
         if not isinstance(domain_data, list):
-            domain_data = [domain_data] if domain_data else []
+            return domains
 
         for item in domain_data:
             if not isinstance(item, dict):
                 continue
             try:
-                name = item.get("domain", item.get("name", ""))
+                name = self._extract_domain_name(item)
                 if not name:
                     continue
-                tld = name.split(".")[-1] if "." in name else ""
-
-                # Parse expiry date
-                expiry_str = item.get("expiry_date", item.get("expires_at", item.get("expiry", "")))
-                expiry_date = self._parse_date(expiry_str) if expiry_str else datetime.now()
-
-                # Parse registration date
-                reg_str = item.get("registration_date", item.get("created_at", item.get("created", "")))
-                reg_date = self._parse_date(reg_str) if reg_str else None
-
-                # Map status
-                status_map = {
-                    "active": "active",
-                    "inactive": "inactive",
-                    "expired": "expired",
-                    "pending": "pending",
-                    "locked": "locked",
-                    "redemption": "redemption",
-                    "transferring": "transferring"
-                }
-                status = status_map.get(item.get("status", "active").lower(), "active")
-
-                # Auto-renew
+                expiry_date = self._extract_required_expiry(item)
+                if not expiry_date:
+                    logger.warning("Skipping Spaceship domain without expiry date: %s", item)
+                    continue
+                reg_date = self._parse_date(item.get("registration_date") or item.get("created_at") or item.get("created"))
+                status_raw = str(item.get("status", "active")).lower()
                 auto_renew = item.get("auto_renew", item.get("autorenew", False))
-                if isinstance(auto_renew, str):
-                    auto_renew = auto_renew.lower() in ("true", "yes", "1")
+                locked = item.get("locked", item.get("is_locked", False))
+                privacy = item.get("whois_privacy", item.get("privacy", False))
 
                 domains.append(DomainInfo(
                     name=name,
-                    tld=tld,
-                    status=status,
+                    tld=name.rsplit(".", 1)[-1] if "." in name else "",
+                    status={
+                        "active": "active",
+                        "inactive": "inactive",
+                        "expired": "expired",
+                        "pending": "pending",
+                        "locked": "locked",
+                        "redemption": "redemption",
+                        "transferring": "transferring",
+                    }.get(status_raw, status_raw or "active"),
                     registration_date=reg_date,
                     expiry_date=expiry_date,
-                    auto_renew=auto_renew,
-                    locked=item.get("locked", False),
-                    whois_privacy=item.get("whois_privacy", item.get("privacy", False)),
-                    nameservers=item.get("nameservers") or [],
-                    external_id=item.get("id", item.get("domain_id", item.get("uuid"))),
-                    raw_data=item
+                    auto_renew=self._to_bool(auto_renew),
+                    locked=self._to_bool(locked),
+                    whois_privacy=self._to_bool(privacy),
+                    nameservers=self._normalize_nameservers(item.get("nameservers") or item.get("name_servers")),
+                    external_id=self._stringify(item.get("id") or item.get("domain_id") or item.get("uuid")),
+                    raw_data=item,
                 ))
             except Exception as e:
                 logger.warning(f"Failed to parse Spaceship domain item: {item}, error: {e}")
-                continue
         return domains
+
+    def _extract_domain_name(self, item: dict[str, Any]) -> str:
+        domain_value = item.get("domain")
+        if isinstance(domain_value, dict):
+            name = domain_value.get("name", "")
+            extension = domain_value.get("extension", "")
+            if name and extension:
+                return f"{name}.{extension}".lower()
+            return str(name).strip().lower()
+        return str(item.get("domain") or item.get("name") or "").strip().lower()
+
+    def _extract_required_expiry(self, item: dict[str, Any]) -> Optional[datetime]:
+        return self._parse_date(item.get("expiry_date") or item.get("expires_at") or item.get("expiry") or item.get("expiration_date"))
+
+    def _normalize_nameservers(self, value: Any) -> List[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            if isinstance(item, dict):
+                item = item.get("name") or item.get("hostname") or item.get("host")
+            if not item:
+                continue
+            normalized.append(str(item).strip().lower().rstrip("."))
+        return normalized
+
+    def _to_bool(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "yes", "1", "on", "enabled"}
+        return bool(value)
+
+    def _stringify(self, value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        return str(value)
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """Parse date string defensively"""
         if not date_str:
             return None
+        normalized = date_str.strip()
+        try:
+            iso_value = normalized.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(iso_value)
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            pass
+
         formats = [
             "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%SZ",
             "%Y-%m-%dT%H:%M:%S%z",
-            "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%S.%fZ",
             "%Y-%m-%dT%H:%M:%S.%f%z",
         ]
         for fmt in formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                parsed = datetime.strptime(normalized, fmt)
+                return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
             except ValueError:
                 continue
         logger.warning(f"Could not parse date: {date_str}")
@@ -273,7 +373,7 @@ class SpaceshipAdapter(BasePlatformAdapter):
                     continue
 
                 records.append(DnsRecordInfo(
-                    external_id=item.get("id", item.get("record_id", item.get("uuid"))),
+                    external_id=self._stringify(item.get("id", item.get("record_id", item.get("uuid")))),
                     record_type=record_type.upper(),
                     name=name.rstrip(".") if name else "",
                     content=str(content) if content else "",
