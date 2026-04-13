@@ -1,44 +1,20 @@
 <template>
-  <div class="service-discovery-container">
-    <el-card shadow="never" class="toolbar-card">
-      <div class="toolbar">
-        <div class="toolbar-copy">
-          <div class="page-title">服务解析</div>
-          <div class="page-subtitle">查看已配置命名空间中的 Ingress 域名与 LB 地址映射。</div>
-          <div class="page-description">
-            数据来自配置中心中预设的 K8s kubeconfig 与命名空间白名单。
-          </div>
-        </div>
-
-        <div class="toolbar-actions">
-          <el-select
-            v-model="selectedNamespace"
-            class="namespace-select"
-            placeholder="请选择命名空间"
-            :disabled="!namespaceOptions.length || loading"
-          >
-            <el-option
-              v-for="item in namespaceOptions"
-              :key="item.namespace"
-              :label="item.label"
-              :value="item.namespace"
-            />
-          </el-select>
-          <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
-          <el-button type="primary" :loading="loading" :disabled="!selectedNamespace" @click="loadIngresses">
-            查询 Ingress
-          </el-button>
-          <el-button
-            v-if="authStore.isAdmin"
-            type="success"
-            plain
-            @click="router.push('/system-settings')"
-          >
-            去配置中心
-          </el-button>
-        </div>
+  <div class="service-discovery-container page-stack">
+    <PageHero
+      eyebrow="SERVICE MAP"
+      title="服务解析"
+      subtitle="查看已配置命名空间中的 Ingress 域名与 LB 地址映射，适合做入口资产盘点与变更校验。"
+      tone="green"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>当前命名空间：{{ currentNamespaceLabel }}</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>命名空间 {{ namespaceOptions.length }}</span>
+        <span>Ingress {{ ingressCount }}</span>
+        <span>域名 {{ hostCount }}</span>
       </div>
-    </el-card>
+    </PageHero>
 
     <el-empty
       v-if="!configured"
@@ -47,19 +23,19 @@
     />
 
     <template v-else>
-      <div class="stats-grid">
-        <el-card shadow="hover" class="stat-card">
+      <div class="page-grid-3">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="命名空间" :value="namespaceOptions.length" />
         </el-card>
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="Ingress 数量" :value="ingressCount" />
         </el-card>
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="域名数量" :value="hostCount" />
         </el-card>
       </div>
 
-      <el-card shadow="never" class="table-card">
+      <el-card shadow="never" class="table-card data-card">
         <template #header>
           <div class="table-header">
             <div class="table-heading">
@@ -70,6 +46,19 @@
               <div class="table-subtitle">支持按 Ingress 名称、域名或 LB 地址快速筛选。</div>
             </div>
             <div class="table-tools">
+              <el-select
+                v-model="selectedNamespace"
+                class="namespace-select"
+                placeholder="请选择命名空间"
+                :disabled="!namespaceOptions.length || loading"
+              >
+                <el-option
+                  v-for="item in namespaceOptions"
+                  :key="item.namespace"
+                  :label="item.label"
+                  :value="item.namespace"
+                />
+              </el-select>
               <el-input
                 v-model="keyword"
                 class="search-input"
@@ -87,40 +76,54 @@
                   :value="size"
                 />
               </el-select>
+              <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!selectedNamespace" @click="loadIngresses">
+                查询 Ingress
+              </el-button>
+              <el-button
+                v-if="authStore.isAdmin"
+                type="success"
+                plain
+                @click="router.push('/system-settings')"
+              >
+                去配置中心
+              </el-button>
             </div>
           </div>
         </template>
 
-        <el-table
-          v-loading="loading"
-          :data="pagedIngressItems"
-          empty-text="暂无 Ingress 数据"
-          border
-          stripe
-          class="ingress-table"
-        >
-          <el-table-column prop="name" label="Ingress 名称" min-width="220" show-overflow-tooltip />
-          <el-table-column label="域名" min-width="320">
-            <template #default="{ row }">
-              <div class="tag-list">
-                <el-tag v-for="host in row.hosts" :key="host" class="host-tag" type="success">
-                  {{ host }}
-                </el-tag>
-                <span v-if="!row.hosts.length" class="placeholder-text">未配置域名</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="LB 地址" min-width="320">
-            <template #default="{ row }">
-              <div class="tag-list">
-                <el-tag v-for="item in row.load_balancers" :key="item" class="host-tag" type="info">
-                  {{ item }}
-                </el-tag>
-                <span v-if="!row.load_balancers.length" class="placeholder-text">-</span>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-shell">
+          <el-table
+            v-loading="loading"
+            :data="pagedIngressItems"
+            empty-text="暂无 Ingress 数据"
+            border
+            stripe
+            class="ingress-table"
+          >
+            <el-table-column prop="name" label="Ingress 名称" min-width="220" show-overflow-tooltip />
+            <el-table-column label="域名" min-width="320">
+              <template #default="{ row }">
+                <div class="tag-list">
+                  <el-tag v-for="host in row.hosts" :key="host" class="host-tag" type="success">
+                    {{ host }}
+                  </el-tag>
+                  <span v-if="!row.hosts.length" class="placeholder-text">未配置域名</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="LB 地址" min-width="320">
+              <template #default="{ row }">
+                <div class="tag-list">
+                  <el-tag v-for="item in row.load_balancers" :key="item" class="host-tag" type="info">
+                    {{ item }}
+                  </el-tag>
+                  <span v-if="!row.load_balancers.length" class="placeholder-text">-</span>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
 
         <div v-if="filteredIngressItems.length" class="pagination-wrap">
           <el-pagination
@@ -140,6 +143,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+import PageHero from '@/components/PageHero.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   getServiceDiscoveryConfig,
@@ -252,66 +256,22 @@ onMounted(async () => {
 <style scoped>
 .service-discovery-container {
   width: 100%;
-  padding-bottom: 20px;
 }
 
-.toolbar-card {
-  margin-bottom: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
-}
-
-.toolbar {
+.hero-metrics {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
   flex-wrap: wrap;
-}
-
-.toolbar-copy {
-  max-width: 560px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.page-subtitle {
-  margin-top: 6px;
-  font-size: 14px;
-  color: #4b5563;
-}
-
-.page-description {
-  margin-top: 10px;
-  color: #6b7280;
-  line-height: 1.6;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
 }
 
 .namespace-select {
   width: 240px;
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
 .stat-card {
-  border-radius: 14px;
+  min-height: 126px;
 }
 
 .table-card {
@@ -353,6 +313,10 @@ onMounted(async () => {
 
 .page-size-select {
   width: 110px;
+}
+
+.table-shell {
+  overflow-x: auto;
 }
 
 .table-title {
@@ -402,15 +366,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 900px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
   .namespace-select {
-    width: 100%;
-  }
-
-  .toolbar-actions {
     width: 100%;
   }
 
