@@ -128,6 +128,43 @@ async def test_create_dns_record_returns_pending_change_request(client, async_se
 
 
 @pytest.mark.asyncio
+async def test_create_dns_record_rejects_invalid_a_record_content(client, async_session, auth_headers):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="invalid-a.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        f"/api/v1/dns/{domain.id}/records",
+        headers=auth_headers,
+        json={
+            "record_type": "A",
+            "name": "www",
+            "content": "aaaaa",
+            "ttl": 300,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "A 记录值必须是合法的 IPv4 地址"
+
+
+@pytest.mark.asyncio
 async def test_create_dns_record_rejects_non_cloudflare_domain(client, async_session, auth_headers):
     account = PlatformAccount(
         platform="dynadot",
@@ -654,6 +691,98 @@ async def test_feishu_callback_approve_executes_request(client, async_session, a
     data = callback_resp.json()
     assert data["toast"]["type"] == "success"
     assert all(element["tag"] != "action" for element in data["card"]["data"]["elements"])
+
+
+@pytest.mark.asyncio
+async def test_feishu_callback_approve_returns_failed_card_when_execution_errors(
+    client,
+    async_session,
+    auth_headers,
+    sample_user,
+    monkeypatch,
+):
+    account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-test",
+        credentials="{}",
+        is_active=True,
+    )
+    async_session.add(account)
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=account.id,
+        domain_name="callback-invalid-a.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=30),
+        nameservers=["amy.ns.cloudflare.com", "hugh.ns.cloudflare.com"],
+    )
+    async_session.add(domain)
+    await async_session.flush()
+
+    change_request = ChangeRequest(
+        request_no="legacyinvalid1",
+        source="api",
+        requester_user_id=sample_user.id,
+        requester_name=sample_user.display_name or sample_user.username,
+        operation_type="dns_create",
+        target_type="dns_record",
+        domain_id=domain.id,
+        payload={
+            "domain_id": domain.id,
+            "domain_name": domain.domain_name,
+            "data": {
+                "record_type": "A",
+                "name": "www",
+                "content": "aaaaa",
+                "ttl": 300,
+                "proxied": True,
+            },
+        },
+        before_snapshot={"domain_name": domain.domain_name},
+        after_snapshot={"record_type": "A", "name": "www", "content": "aaaaa", "ttl": 300},
+        risk_level="high",
+        status="pending_approval",
+        approval_channel="feishu",
+    )
+    async_session.add(change_request)
+    await async_session.commit()
+    await async_session.refresh(change_request)
+
+    monkeypatch.setattr(settings, "FEISHU_APPROVAL_CALLBACK_TOKEN", "token-123")
+
+    callback_resp = await client.post(
+        "/api/v1/webhooks/feishu/change-requests",
+        headers={"X-Feishu-Token": "token-123"},
+        json={
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "token-123",
+            },
+            "event": {
+                "operator": {
+                    "username": sample_user.username,
+                },
+                "action": {
+                    "value": {
+                        "action": "approve",
+                        "request_id": str(change_request.id),
+                    }
+                }
+            },
+        },
+    )
+
+    assert callback_resp.status_code == 200
+    data = callback_resp.json()
+    assert data["toast"]["type"] == "error"
+    assert "IPv4" in data["toast"]["content"]
+    assert all(element["tag"] != "action" for element in data["card"]["data"]["elements"])
+    assert "执行失败" in json.dumps(data["card"]["data"], ensure_ascii=False)
+
+    await async_session.refresh(change_request)
+    assert change_request.status == "failed"
+    assert "IPv4" in change_request.error_message
 
 
 @pytest.mark.asyncio

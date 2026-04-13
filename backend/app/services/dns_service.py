@@ -10,6 +10,7 @@ from app.adapters import get_adapter
 from app.core.encryption import decrypt_credentials
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
 from app.services.dns_eligibility import is_dns_managed_by_account
+from app.services.dns_validation import validate_dns_record_fields
 
 logger = logging.getLogger(__name__)
 DEFAULT_PROXIED_RECORD_TYPES = {"A", "AAAA", "CNAME"}
@@ -138,12 +139,20 @@ async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCre
     domain = await _get_domain_with_account(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
-    proxied = _normalize_proxied_value(domain.account.platform, data.record_type, data.proxied)
+    normalized = validate_dns_record_fields(
+        record_type=data.record_type,
+        name=data.name,
+        content=data.content,
+        ttl=data.ttl or 3600,
+        priority=data.priority,
+        proxied=data.proxied,
+    )
+    proxied = _normalize_proxied_value(domain.account.platform, normalized["record_type"], normalized["proxied"])
 
     from app.adapters.base import DnsRecordInfo
     record_info = DnsRecordInfo(
-        record_type=data.record_type, name=data.name, content=data.content,
-        ttl=data.ttl or 3600, priority=data.priority, proxied=proxied,
+        record_type=normalized["record_type"], name=normalized["name"], content=normalized["content"],
+        ttl=normalized["ttl"] or 3600, priority=normalized["priority"], proxied=proxied,
     )
 
     adapter = get_adapter(domain.account.platform, decrypt_credentials(domain.account.credentials))
@@ -151,8 +160,8 @@ async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCre
         external_id = await adapter.create_dns_record(domain.domain_name, record_info)
 
     record = DnsRecord(
-        domain_id=domain_id, record_type=data.record_type, name=data.name,
-        content=data.content, ttl=data.ttl or 3600, priority=data.priority,
+        domain_id=domain_id, record_type=normalized["record_type"], name=normalized["name"],
+        content=normalized["content"], ttl=normalized["ttl"] or 3600, priority=normalized["priority"],
         proxied=proxied, external_id=external_id, sync_status="synced",
     )
     db.add(record)
@@ -169,14 +178,22 @@ async def update_dns_record(db: AsyncSession, record_id: int, data: DnsRecordUpd
     update_fields = data.model_dump(exclude_unset=True)
     if not update_fields:
         return record
-
-    from app.adapters.base import DnsRecordInfo
-    record_info = DnsRecordInfo(
-        record_type=record.record_type, name=record.name,
+    normalized = validate_dns_record_fields(
+        record_type=record.record_type,
+        name=record.name,
         content=update_fields.get("content", record.content),
         ttl=update_fields.get("ttl", record.ttl),
         priority=update_fields.get("priority", record.priority),
         proxied=update_fields.get("proxied", record.proxied),
+    )
+
+    from app.adapters.base import DnsRecordInfo
+    record_info = DnsRecordInfo(
+        record_type=normalized["record_type"], name=normalized["name"],
+        content=normalized["content"],
+        ttl=normalized["ttl"],
+        priority=normalized["priority"],
+        proxied=normalized["proxied"],
     )
 
     if not record.external_id:
@@ -188,6 +205,8 @@ async def update_dns_record(db: AsyncSession, record_id: int, data: DnsRecordUpd
         await adapter.update_dns_record(domain.domain_name, record.external_id, record_info)
 
     for key, value in update_fields.items():
+        if key in normalized:
+            value = normalized[key]
         setattr(record, key, value)
     await db.commit()
     await db.refresh(record)

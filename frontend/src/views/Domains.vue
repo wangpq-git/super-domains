@@ -345,10 +345,15 @@ async function handleBatchNs() {
   batchLoading.value = true
   try {
     const res = await batchUpdateNameservers(domainIds, nameservers)
-    const results = (res.data as any).results || []
-    const success = results.filter((r: any) => r.status === 'success').length
-    const failed = results.filter((r: any) => r.status === 'error').length
-    ElMessage.success(`NS修改完成：成功 ${success}，失败 ${failed}`)
+    const payload = res.data as any
+    if (payload.status === 'pending_approval') {
+      ElMessage.success(`NS 修改申请已提交审批：${payload.request_no}`)
+    } else {
+      const results = payload.results || []
+      const success = results.filter((r: any) => r.status === 'success').length
+      const failed = results.filter((r: any) => r.status === 'error').length
+      ElMessage.success(`NS修改完成：成功 ${success}，失败 ${failed}`)
+    }
     showNsDialog.value = false
     clearSelection()
     store.fetchDomains()

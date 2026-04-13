@@ -149,7 +149,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import PageHero from '@/components/PageHero.vue'
-import type { FormInstance } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { getDomains } from '@/api/domains'
 import {
   getDnsRecords,
@@ -189,10 +189,65 @@ const selectedDomainLabel = computed(() => {
 })
 const syncedCount = computed(() => records.value.filter((record) => record.sync_status === 'synced').length)
 
-const rules = {
+function isValidIpv4(value: string) {
+  const parts = value.trim().split('.')
+  if (parts.length !== 4) return false
+  return parts.every((part) => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
+}
+
+function isLikelyIpv6(value: string) {
+  const normalized = value.trim()
+  return normalized.includes(':') && /^[0-9a-fA-F:]+$/.test(normalized)
+}
+
+function isValidHostLike(value: string) {
+  const normalized = value.trim().replace(/\.$/, '')
+  if (!normalized) return false
+  return normalized.split('.').every((label) => /^[A-Za-z0-9_-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-'))
+}
+
+function validateContent(_: unknown, value: string, callback: (error?: Error) => void) {
+  const content = (value || '').trim()
+  if (!content) {
+    callback(new Error('请输入内容'))
+    return
+  }
+
+  if (form.value.proxied && !['A', 'AAAA', 'CNAME'].includes(form.value.record_type)) {
+    callback(new Error('仅 A、AAAA、CNAME 记录支持开启代理'))
+    return
+  }
+
+  if (form.value.record_type === 'A' && !isValidIpv4(content)) {
+    callback(new Error('A 记录值必须是合法的 IPv4 地址'))
+    return
+  }
+  if (form.value.record_type === 'AAAA' && !isLikelyIpv6(content)) {
+    callback(new Error('AAAA 记录值必须是合法的 IPv6 地址'))
+    return
+  }
+  if (['CNAME', 'MX', 'NS'].includes(form.value.record_type) && !isValidHostLike(content)) {
+    callback(new Error(`${form.value.record_type} 记录值格式不正确`))
+    return
+  }
+  if (form.value.record_type === 'SRV') {
+    const parts = content.split(/\s+/)
+    if (parts.length !== 3 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1]) || !isValidHostLike(parts[2])) {
+      callback(new Error('SRV 记录值格式应为: weight port target'))
+      return
+    }
+  }
+
+  callback()
+}
+
+const rules: FormRules = {
   record_type: [{ required: true, message: '请选择记录类型', trigger: 'change' }],
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
-  content: [{ required: true, message: '请输入内容', trigger: 'blur' }],
+  content: [
+    { required: true, message: '请输入内容', trigger: 'blur' },
+    { validator: validateContent, trigger: ['blur', 'change'] },
+  ],
 }
 
 function recordTypeTag(type: string): '' | 'success' | 'warning' | 'danger' | 'info' {
@@ -314,8 +369,12 @@ async function handleSubmit() {
     if (isEdit.value && editId.value) {
       const payload: any = { content: form.value.content, ttl: form.value.ttl, proxied: form.value.proxied }
       if (showPriority.value) payload.priority = form.value.priority
-      await updateDnsRecord(editId.value, payload)
-      ElMessage.success('更新成功')
+      const { data } = await updateDnsRecord(editId.value, payload)
+      if (data.status === 'pending_approval') {
+        ElMessage.success(`修改申请已提交审批：${data.request_no}`)
+      } else {
+        ElMessage.success('更新成功')
+      }
     } else {
       const payload: any = {
         record_type: form.value.record_type,
@@ -325,8 +384,12 @@ async function handleSubmit() {
         proxied: form.value.proxied,
       }
       if (showPriority.value) payload.priority = form.value.priority
-      await createDnsRecord(selectedDomainId.value!, payload)
-      ElMessage.success('添加成功')
+      const { data } = await createDnsRecord(selectedDomainId.value!, payload)
+      if (data.status === 'pending_approval') {
+        ElMessage.success(`新增申请已提交审批：${data.request_no}`)
+      } else {
+        ElMessage.success('添加成功')
+      }
     }
     dialogVisible.value = false
     await fetchRecords(true)
@@ -339,8 +402,12 @@ async function handleSubmit() {
 
 async function handleDelete(row: DnsRecord) {
   try {
-    await deleteDnsRecord(row.id)
-    ElMessage.success('删除成功')
+    const { data } = await deleteDnsRecord(row.id)
+    if (data.status === 'pending_approval') {
+      ElMessage.success(`删除申请已提交审批：${data.request_no}`)
+    } else {
+      ElMessage.success('删除成功')
+    }
     await fetchRecords(true)
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '删除失败')

@@ -34,6 +34,8 @@
         <el-form-item label="状态">
           <el-select v-model="filters.status" clearable placeholder="全部状态" style="width: 180px">
             <el-option label="待审批" value="pending_approval" />
+            <el-option label="已批准" value="approved" />
+            <el-option label="执行中" value="executing" />
             <el-option label="执行成功" value="succeeded" />
             <el-option label="已拒绝" value="rejected" />
             <el-option label="执行失败" value="failed" />
@@ -78,12 +80,12 @@
         <el-table-column prop="domain_id" label="域名ID" width="90" />
         <el-table-column prop="risk_level" label="风险" width="90">
           <template #default="{ row }">
-            <el-tag :type="riskTagType(row.risk_level)" size="small">{{ row.risk_level }}</el-tag>
+            <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="140">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="摘要" min-width="280">
@@ -149,16 +151,23 @@
       <template v-if="currentRequest">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="申请单号">{{ currentRequest.request_no }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ currentRequest.status }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ statusLabel(currentRequest.status) }}</el-descriptions-item>
           <el-descriptions-item label="操作类型">{{ operationLabel(currentRequest.operation_type) }}</el-descriptions-item>
           <el-descriptions-item label="审批人">{{ currentRequest.approver_name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="申请人">
             {{ currentRequest.requester_name || currentRequest.requester_user_id }}
           </el-descriptions-item>
-          <el-descriptions-item label="风险等级">{{ currentRequest.risk_level }}</el-descriptions-item>
+          <el-descriptions-item label="风险等级">{{ riskLabel(currentRequest.risk_level) }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatTime(currentRequest.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="执行时间">{{ formatTime(currentRequest.executed_at) }}</el-descriptions-item>
         </el-descriptions>
+
+        <div class="detail-section">
+          <div class="detail-title">处理状态</div>
+          <div class="result-box" :class="resultBoxClass(currentRequest.status)">
+            {{ requestOutcome(currentRequest) }}
+          </div>
+        </div>
 
         <div class="detail-section">
           <div class="detail-title">请求载荷</div>
@@ -245,7 +254,11 @@ function formatTime(value: string | null) {
 }
 
 function prettyJson(value: Record<string, any> | null | undefined) {
-  return JSON.stringify(value || {}, null, 2)
+  try {
+    return JSON.stringify(value || {}, null, 2)
+  } catch {
+    return '{}'
+  }
 }
 
 function compactPayload(value: Record<string, any>) {
@@ -256,7 +269,7 @@ function compactPayload(value: Record<string, any>) {
 function operationLabel(operationType: string) {
   const mapping: Record<string, string> = {
     dns_create: 'DNS 新增',
-    dns_update: 'DNS 更新',
+    dns_update: 'DNS 修改',
     dns_delete: 'DNS 删除',
     batch_dns_update: '批量 DNS',
     batch_nameserver_update: '批量 NS',
@@ -267,6 +280,19 @@ function operationLabel(operationType: string) {
 
 function summarizeTarget(row: ChangeRequest) {
   return row.target_id ? `${row.target_type} #${row.target_id}` : row.target_type
+}
+
+function statusLabel(status: string) {
+  const mapping: Record<string, string> = {
+    pending_approval: '待审批',
+    approved: '已批准',
+    rejected: '已拒绝',
+    executing: '执行中',
+    succeeded: '执行成功',
+    failed: '执行失败',
+    cancelled: '已取消',
+  }
+  return mapping[status] || status
 }
 
 function statusTagType(status: string) {
@@ -289,6 +315,44 @@ function riskTagType(level: string) {
     high: 'danger',
   }
   return mapping[level] || 'info'
+}
+
+function riskLabel(level: string) {
+  const mapping: Record<string, string> = {
+    low: '低',
+    medium: '中',
+    high: '高',
+  }
+  return mapping[level] || level
+}
+
+function requestOutcome(row: ChangeRequest) {
+  if (row.status === 'failed') {
+    return row.error_message ? `审批已通过，但执行失败：${row.error_message}` : '审批已通过，但执行失败'
+  }
+  if (row.status === 'succeeded') {
+    return row.approver_name ? `已由 ${row.approver_name} 审批通过并执行成功` : '已审批通过并执行成功'
+  }
+  if (row.status === 'rejected') {
+    return row.rejection_reason ? `审批已拒绝：${row.rejection_reason}` : '审批已拒绝'
+  }
+  if (row.status === 'executing') return '审批已通过，正在执行'
+  if (row.status === 'approved') return '审批已通过，等待系统执行'
+  if (row.status === 'cancelled') return '申请人已撤销该变更单'
+  return '等待审批'
+}
+
+function resultBoxClass(status: string) {
+  const mapping: Record<string, string> = {
+    succeeded: 'result-box--success',
+    failed: 'result-box--danger',
+    rejected: 'result-box--danger',
+    executing: 'result-box--info',
+    approved: 'result-box--info',
+    cancelled: 'result-box--muted',
+    pending_approval: 'result-box--warning',
+  }
+  return mapping[status] || 'result-box--info'
 }
 
 async function fetchChangeRequests(force = false) {
@@ -345,8 +409,17 @@ async function handleApprove(requestId: number) {
   actionLoadingId.value = requestId
   actionType.value = 'approve'
   try {
-    await approveChangeRequest(requestId)
-    ElMessage.success('审批完成')
+    const { data } = await approveChangeRequest(requestId)
+    if (data.status === 'failed') {
+      ElMessage.error(data.error_message || '审批已通过，但执行失败')
+    } else if (data.status === 'succeeded') {
+      ElMessage.success('审批通过，执行成功')
+    } else {
+      ElMessage.success(`审批完成，当前状态：${statusLabel(data.status)}`)
+    }
+    if (currentRequest.value?.id === data.id) {
+      currentRequest.value = data
+    }
     await fetchChangeRequests()
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '审批失败')
@@ -469,6 +542,38 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.result-box {
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.result-box--success {
+  background: #ecfdf3;
+  color: #0f766e;
+}
+
+.result-box--danger {
+  background: #fef2f2;
+  color: #b42318;
+}
+
+.result-box--info {
+  background: #eef4ff;
+  color: #1d4ed8;
+}
+
+.result-box--warning {
+  background: #fff7e6;
+  color: #b45309;
+}
+
+.result-box--muted {
+  background: #f3f4f6;
+  color: #4b5563;
 }
 
 .json-box {
