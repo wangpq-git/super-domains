@@ -197,6 +197,42 @@ async def test_porkbun_get_domain_nameservers_uses_api_response_when_available(m
 
 
 @pytest.mark.asyncio
+async def test_porkbun_list_domains_parses_expire_date_and_create_date(monkeypatch):
+    adapter = PorkbunAdapter({"api_key": "test", "secret_key": "secret"})
+
+    async with adapter:
+        async def fake_request(method, path, **kwargs):
+            assert path == "/domain/listAll"
+            return {
+                "domains": [
+                    {
+                        "domain": "example.com",
+                        "status": "ACTIVE",
+                        "createDate": "2024-12-21 08:14:26",
+                        "expireDate": "2026-12-21 08:14:26",
+                        "autoRenew": "1",
+                        "securityLock": "1",
+                        "whoisPrivacy": "1",
+                    }
+                ]
+            }
+
+        async def fake_get_domain_nameservers(domain_name):
+            assert domain_name == "example.com"
+            return ["ns1.cloudflare.com", "ns2.cloudflare.com"]
+
+        monkeypatch.setattr(adapter, "_request", fake_request)
+        monkeypatch.setattr(adapter, "_get_domain_nameservers", fake_get_domain_nameservers)
+
+        domains = await adapter.list_domains()
+
+    assert len(domains) == 1
+    assert domains[0].registration_date == __import__("datetime").datetime(2024, 12, 21, 8, 14, 26)
+    assert domains[0].expiry_date == __import__("datetime").datetime(2026, 12, 21, 8, 14, 26)
+    assert domains[0].nameservers == ["ns1.cloudflare.com", "ns2.cloudflare.com"]
+
+
+@pytest.mark.asyncio
 async def test_spaceship_authenticate_falls_back_to_header_auth(monkeypatch):
     adapter = SpaceshipAdapter({"api_key": "key", "api_secret": "secret"})
 
@@ -225,13 +261,13 @@ async def test_spaceship_parse_domain_list_normalizes_payload():
             "items": [
                 {
                     "domain": {"name": "Example", "extension": "COM"},
-                    "status": "ACTIVE",
+                    "lifecycleStatus": "REGISTERED",
                     "registration_date": "2024-01-02T03:04:05Z",
                     "expiry_date": "2030-01-02T03:04:05Z",
                     "auto_renew": "yes",
                     "locked": "1",
                     "privacy": True,
-                    "nameservers": ["NS1.EXAMPLE.COM", {"host": "ns2.example.com."}],
+                    "nameservers": {"hosts": ["NS1.EXAMPLE.COM", {"host": "ns2.example.com."}]},
                     "id": 123,
                 }
             ]
@@ -270,12 +306,12 @@ async def test_spaceship_list_domains_uses_page_pagination(monkeypatch):
 
     async with adapter:
         adapter._auth_mode = "header"
-        seen_pages = []
+        seen_skips = []
 
         async def fake_request(method, path, **kwargs):
-            seen_pages.append(kwargs["params"]["page"])
-            page = kwargs["params"]["page"]
-            if page == 1:
+            seen_skips.append(kwargs["params"]["skip"])
+            skip = kwargs["params"]["skip"]
+            if skip == 0:
                 return {
                     "data": [
                         {"domain": "one.com", "expiry_date": "2030-01-01T00:00:00Z"},
@@ -294,7 +330,7 @@ async def test_spaceship_list_domains_uses_page_pagination(monkeypatch):
 
         domains = await adapter.list_domains(limit=2)
 
-    assert seen_pages == [1, 2]
+    assert seen_skips == [0, 2]
     assert [domain.name for domain in domains] == ["one.com", "two.com", "three.com"]
 
 
@@ -337,7 +373,7 @@ async def test_spaceship_probe_auth_mode_sets_expected_headers():
         response = httpx.Response(200, json={"data": []}, request=httpx.Request("GET", "https://spaceship.dev/api/v1/domains"))
 
         async def fake_get(url, **kwargs):
-            assert kwargs["params"] == {"page": 1, "per_page": 1}
+            assert kwargs["params"] == {"take": 1, "skip": 0}
             assert adapter.client.headers["X-Api-Key"] == "key"
             assert adapter.client.headers["X-Api-Secret"] == "secret"
             return response
@@ -451,3 +487,23 @@ async def test_spaceship_extract_domain_name_from_flat_payload():
 
     assert adapter._extract_domain_name({"domain": "Flat.COM"}) == "flat.com"
     assert adapter._extract_domain_name({"name": "Another.NET"}) == "another.net"
+
+
+def test_spaceship_parse_domain_list_maps_suspensions_to_suspended():
+    adapter = SpaceshipAdapter({"api_key": "key", "api_secret": "secret"})
+
+    domains = adapter._parse_domain_list({
+        "items": [
+            {
+                "name": "hold.example",
+                "expirationDate": "2030-01-01T00:00:00",
+                "lifecycleStatus": "registered",
+                "suspensions": [{"reasonCode": "abuse"}],
+                "nameservers": {"hosts": ["ns1.example.com", "ns2.example.com"]},
+            }
+        ]
+    })
+
+    assert len(domains) == 1
+    assert domains[0].status == "suspended"
+    assert domains[0].nameservers == ["ns1.example.com", "ns2.example.com"]
