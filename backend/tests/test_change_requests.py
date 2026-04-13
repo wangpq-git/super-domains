@@ -2044,6 +2044,7 @@ async def test_change_request_card_uses_plain_text_sections_for_better_feishu_la
     assert first_block["tag"] == "div"
     assert first_block["text"]["tag"] == "plain_text"
     assert "`" not in first_block["text"]["content"]
+    assert card["config"]["update_multi"] is True
 
     field_block = card["elements"][2]
     assert field_block["tag"] == "div"
