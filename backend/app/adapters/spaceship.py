@@ -115,7 +115,7 @@ class SpaceshipAdapter(BasePlatformAdapter):
         self._apply_auth_headers(self.client)
         response = await self.client.get(
             f"{self.BASE_URL}/domains",
-            params={"page": 1, "per_page": self._AUTH_PROBE_LIMIT},
+            params={"take": self._AUTH_PROBE_LIMIT, "skip": 0},
             headers={"Accept": "application/json"},
         )
         if response.status_code < 400:
@@ -172,10 +172,11 @@ class SpaceshipAdapter(BasePlatformAdapter):
         current_page = max(page, 1)
 
         while True:
+            skip = (current_page - 1) * limit
             data = await self._request(
                 "GET",
                 "/domains",
-                params={"page": current_page, "per_page": limit},
+                params={"take": limit, "skip": skip},
             )
             domains = self._parse_domain_list(data)
             all_domains.extend(domains)
@@ -228,11 +229,19 @@ class SpaceshipAdapter(BasePlatformAdapter):
                 if not expiry_date:
                     logger.warning("Skipping Spaceship domain without expiry date: %s", item)
                     continue
-                reg_date = self._parse_date(item.get("registration_date") or item.get("created_at") or item.get("created"))
-                status_raw = str(item.get("status", "active")).lower()
-                auto_renew = item.get("auto_renew", item.get("autorenew", False))
-                locked = item.get("locked", item.get("is_locked", False))
-                privacy = item.get("whois_privacy", item.get("privacy", False))
+                reg_date = self._parse_date(
+                    item.get("registration_date")
+                    or item.get("registrationDate")
+                    or item.get("created_at")
+                    or item.get("created")
+                )
+                status_raw = str(item.get("status") or item.get("lifecycleStatus") or "active").lower()
+                auto_renew = item.get("auto_renew", item.get("autoRenew", item.get("autorenew", False)))
+                locked = item.get("locked", item.get("is_locked", bool(item.get("eppStatuses"))))
+                privacy = item.get(
+                    "whois_privacy",
+                    item.get("privacy", item.get("privacyProtection", item.get("contactForm", False)))
+                )
 
                 domains.append(DomainInfo(
                     name=name,
@@ -251,7 +260,11 @@ class SpaceshipAdapter(BasePlatformAdapter):
                     auto_renew=self._to_bool(auto_renew),
                     locked=self._to_bool(locked),
                     whois_privacy=self._to_bool(privacy),
-                    nameservers=self._normalize_nameservers(item.get("nameservers") or item.get("name_servers")),
+                    nameservers=self._normalize_nameservers(
+                        item.get("nameservers")
+                        or item.get("name_servers")
+                        or item.get("nameserver")
+                    ),
                     external_id=self._stringify(item.get("id") or item.get("domain_id") or item.get("uuid")),
                     raw_data=item,
                 ))
@@ -267,10 +280,22 @@ class SpaceshipAdapter(BasePlatformAdapter):
             if name and extension:
                 return f"{name}.{extension}".lower()
             return str(name).strip().lower()
-        return str(item.get("domain") or item.get("name") or "").strip().lower()
+        return str(
+            item.get("domain")
+            or item.get("name")
+            or item.get("unicodeName")
+            or item.get("asciiName")
+            or ""
+        ).strip().lower()
 
     def _extract_required_expiry(self, item: dict[str, Any]) -> Optional[datetime]:
-        return self._parse_date(item.get("expiry_date") or item.get("expires_at") or item.get("expiry") or item.get("expiration_date"))
+        return self._parse_date(
+            item.get("expiry_date")
+            or item.get("expires_at")
+            or item.get("expiry")
+            or item.get("expiration_date")
+            or item.get("expirationDate")
+        )
 
     def _normalize_nameservers(self, value: Any) -> List[str]:
         if not value:
