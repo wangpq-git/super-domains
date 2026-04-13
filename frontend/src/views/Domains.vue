@@ -1,6 +1,33 @@
 <template>
-  <div class="domains-container">
-    <el-card shadow="never" class="filter-card" style="margin-bottom: 0;">
+  <div class="domains-container page-stack">
+    <PageHero
+      eyebrow="ASSET INVENTORY"
+      title="域名管理"
+      subtitle="集中查看域名生命周期、平台归属和 Nameserver 配置，支持快速筛选与批量操作。"
+      tone="blue"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>共 {{ store.total || store.domains.length }} 个域名</el-tag>
+      </template>
+      <div class="hero-highlights">
+        <span>正常 {{ activeCount }}</span>
+        <span>临期 {{ expiringCount }}</span>
+        <span>已选 {{ selectedDomains.length }}</span>
+      </div>
+      <template #actions>
+        <el-button :icon="Refresh" circle @click="handleRefresh" />
+        <el-button :icon="Download" @click="handleExportCsv">导出CSV</el-button>
+        <el-button :icon="Download" @click="handleExportXlsx">导出Excel</el-button>
+      </template>
+    </PageHero>
+
+    <el-card shadow="never" class="filter-card data-card">
+      <template #header>
+        <div>
+          <h3 class="section-title">筛选条件</h3>
+          <p class="section-subtitle">按平台、状态、到期区间和关键词缩小结果范围，适合批量同步前预检。</p>
+        </div>
+      </template>
       <el-form :inline="true" :model="store.filters" @submit.prevent>
         <el-form-item label="平台">
           <el-select v-model="store.filters.platform" placeholder="全部平台" clearable style="width: 160px" @change="handleFilter">
@@ -10,6 +37,7 @@
         <el-form-item label="状态">
           <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 120px" @change="handleFilter">
             <el-option label="活跃" value="active" />
+            <el-option label="已过期" value="expired" />
             <el-option label="待续费" value="pending" />
           </el-select>
         </el-form-item>
@@ -36,10 +64,19 @@
       </el-form>
     </el-card>
 
-    <el-card shadow="never" style="margin-top: 16px">
+    <el-card shadow="never" class="data-card">
+      <template #header>
+        <div class="table-toolbar">
+          <div>
+            <h3 class="section-title">域名列表</h3>
+            <p class="section-subtitle">点击域名可直接进入 DNS 管理；表格优先展示关键生命周期信息。</p>
+          </div>
+          <el-tag type="info" effect="plain">当前 {{ store.domains.length }} 条</el-tag>
+        </div>
+      </template>
       <div v-if="selectedDomains.length > 0" class="batch-bar">
         <span class="batch-info">已选择 {{ selectedDomains.length }} 项</span>
-        <el-tag v-if="hasUnsupportedSelection" type="danger" effect="light">仅 Dynadot 域名支持 NS 变更</el-tag>
+        <el-tag v-if="hasUnsupportedSelection" type="danger" effect="light">仅 Cloudflare 域名支持变更</el-tag>
         <el-button type="primary" :loading="batchLoading" @click="handleBatchSync">批量同步</el-button>
         <el-button
           v-if="authStore.isAdmin"
@@ -51,12 +88,6 @@
           批量修改NS
         </el-button>
         <el-button @click="clearSelection">取消选择</el-button>
-      </div>
-
-      <div class="export-bar">
-        <el-button :icon="Refresh" circle @click="handleRefresh" />
-        <el-button :icon="Download" @click="handleExportCsv">导出CSV</el-button>
-        <el-button :icon="Download" @click="handleExportXlsx">导出Excel</el-button>
       </div>
 
       <el-table
@@ -109,20 +140,6 @@
             <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.platform === 'dynadot'"
-              size="small"
-              type="primary"
-              :loading="onboardingDomainId === row.id"
-              @click="handleOnboardCloudflare(row)"
-            >
-              接入CF
-            </el-button>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
       </el-table>
 
       <div class="pagination-wrapper">
@@ -164,11 +181,11 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
 import { useAuthStore } from '@/stores/auth'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
-import { onboardDomainToCloudflare } from '@/api/domains'
 import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
 interface DomainRow {
@@ -187,12 +204,19 @@ const dateRange = ref<string[]>([])
 const tableRef = ref<InstanceType<typeof ElTable>>()
 const selectedDomains = ref<DomainRow[]>([])
 const batchLoading = ref(false)
-const onboardingDomainId = ref<number | null>(null)
 const showNsDialog = ref(false)
 const nsForm = reactive<string[]>(['', ''])
 
 const platforms = ['cloudflare', 'namecom', 'dynadot', 'godaddy', 'namecheap', 'namesilo', 'openprovider', 'porkbun', 'spaceship']
-const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'dynadot'))
+const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'cloudflare'))
+const activeCount = computed(() => store.domains.filter((domain: any) => domain.status === 'active').length)
+const expiringCount = computed(() => {
+  return store.domains.filter((domain: any) => {
+    if (!domain.expiry_date) return false
+    const diff = Math.ceil((new Date(domain.expiry_date).getTime() - Date.now()) / 86400000)
+    return diff >= 0 && diff <= 30
+  }).length
+})
 
 function handleSelectionChange(rows: DomainRow[]) {
   selectedDomains.value = rows
@@ -281,7 +305,7 @@ async function handleBatchSync() {
 
 async function handleBatchNs() {
   if (hasUnsupportedSelection.value) {
-    ElMessage.warning('当前仅支持批量修改 Dynadot 域名的 NS')
+    ElMessage.warning('当前仅支持批量修改 Cloudflare 域名')
     return
   }
   const nameservers = nsForm.filter(ns => ns.trim())
@@ -304,24 +328,6 @@ async function handleBatchNs() {
     ElMessage.error('批量修改NS失败')
   } finally {
     batchLoading.value = false
-  }
-}
-
-async function handleOnboardCloudflare(row: DomainRow) {
-  onboardingDomainId.value = row.id
-  try {
-    const res = await onboardDomainToCloudflare(row.id)
-    const data = res.data as any
-    if (data.status === 'pending_approval') {
-      ElMessage.success(`已提交 Cloudflare 接入审批，目标账号：${data.payload?.target_account_name ?? '-'}`)
-    } else {
-      ElMessage.success(`Cloudflare 接入完成，目标账号：${data.execution_result?.target_account_name ?? '-'}`)
-    }
-    store.fetchDomains()
-  } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || 'Cloudflare 接入失败')
-  } finally {
-    onboardingDomainId.value = null
   }
 }
 
@@ -382,9 +388,16 @@ onMounted(() => {
   width: 100%;
 }
 
+.hero-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
 .filter-card {
-  margin-bottom: 0;
-  border-radius: 8px !important;
+  border-radius: 18px !important;
 }
 
 .filter-card :deep(.el-card__body) {
@@ -392,17 +405,18 @@ onMounted(() => {
 }
 
 .filter-card :deep(.el-form-item) {
-  margin-bottom: 0;
+  margin-bottom: 8px;
 }
 
 .batch-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 14px;
-  padding: 10px 16px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
   background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
-  border-radius: 8px;
+  border-radius: 14px;
   border: 1px solid #dbeafe;
 }
 
@@ -411,13 +425,6 @@ onMounted(() => {
   color: #4361ee;
   font-weight: 600;
   margin-right: 8px;
-}
-
-.export-bar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 14px;
 }
 
 .expiry-safe { color: #10b981; font-weight: 500; }
@@ -443,5 +450,11 @@ onMounted(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #f0f0f0;
+}
+
+@media (max-width: 768px) {
+  .pagination-wrapper {
+    justify-content: center;
+  }
 }
 </style>

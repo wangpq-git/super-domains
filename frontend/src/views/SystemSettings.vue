@@ -1,5 +1,25 @@
 <template>
-  <div class="system-settings-container">
+  <div class="system-settings-container page-stack">
+    <PageHero
+      eyebrow="CONTROL CENTER"
+      title="系统配置中心"
+      subtitle="统一维护审批、飞书、LDAP、通知与发现相关配置，数据库保存优先于默认值生效。"
+      tone="slate"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>{{ categories.length }} 个分类</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>配置项 {{ settings.length }}</span>
+        <span>已配置 {{ configuredCount }}</span>
+        <span>当前分类 {{ activeCategoryLabel }}</span>
+      </div>
+      <template #actions>
+        <el-button @click="loadSettings">刷新</el-button>
+        <el-button type="primary" :loading="saving" @click="saveCurrentCategory">保存当前分类</el-button>
+      </template>
+    </PageHero>
+
     <el-alert
       title="这里适合配置审批、飞书、LDAP、通知等可热更新参数。数据库、Redis、加密主密钥这类启动级配置仍建议保留在部署环境中。"
       type="info"
@@ -7,19 +27,14 @@
       class="page-tip"
     />
 
-    <el-card shadow="never" v-loading="loading">
+    <el-card shadow="never" class="data-card" v-loading="loading">
       <template #header>
         <div class="card-header">
           <div>
-            <div class="card-title">系统配置中心</div>
-            <div class="card-subtitle">修改后优先保存到数据库，运行时优先生效。</div>
+            <div class="card-title">配置项列表</div>
+            <div class="card-subtitle">按分类逐项维护配置来源、敏感值与是否需要重启的信息。</div>
           </div>
-          <div class="header-actions">
-            <el-button @click="loadSettings">刷新</el-button>
-            <el-button type="primary" :loading="saving" @click="saveCurrentCategory">
-              保存当前分类
-            </el-button>
-          </div>
+          <div class="header-actions"><el-tag type="info" effect="plain">共 {{ settings.length }} 项</el-tag></div>
         </div>
       </template>
 
@@ -112,6 +127,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import { getSystemSettings, updateSystemSettings, type SystemSettingItem } from '@/api/systemSettings'
 
 type SourceType = 'database' | 'environment' | 'default'
@@ -165,6 +181,10 @@ const groupedSettings = computed(() => {
     result[item.category].push(item)
   })
   return result
+})
+const configuredCount = computed(() => settings.value.filter((item) => item.is_configured).length)
+const activeCategoryLabel = computed(() => {
+  return categories.find((category) => category.key === activeCategory.value)?.label || activeCategory.value
 })
 
 function sourceLabel(source: SourceType) {
@@ -248,7 +268,14 @@ onMounted(() => {
 <style scoped>
 .system-settings-container {
   width: 100%;
-  padding-bottom: 20px;
+}
+
+.hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
 }
 
 .page-tip {

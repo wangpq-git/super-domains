@@ -1,15 +1,32 @@
 <template>
-  <div class="change-requests-page">
-    <el-card shadow="never">
+  <div class="change-requests-page page-stack">
+    <PageHero
+      eyebrow="APPROVAL HUB"
+      title="审批中心"
+      :subtitle="authStore.isAdmin ? '统一查看、审批和追踪全部变更单。' : '查看、撤销并跟踪我提交的变更申请。'"
+      tone="green"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>待审批 {{ pendingCount }}</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>总数 {{ pagination.total }}</span>
+        <span>成功 {{ successCount }}</span>
+        <span>失败 {{ failedCount }}</span>
+      </div>
+      <template #actions>
+        <el-button type="primary" :loading="loading" @click="fetchChangeRequests">刷新</el-button>
+      </template>
+    </PageHero>
+
+    <el-card shadow="never" class="data-card">
       <template #header>
         <div class="card-header">
           <div>
-            <div class="page-title">审批中心</div>
-            <div class="page-subtitle">
-              {{ authStore.isAdmin ? '管理员可审批全部变更单' : '查看并跟踪我的变更申请' }}
-            </div>
+            <div class="page-title">变更单列表</div>
+            <div class="page-subtitle">按状态、操作类型和关键词快速定位目标申请单，详情弹窗中可查看完整载荷。</div>
           </div>
-          <el-button type="primary" :loading="loading" @click="fetchChangeRequests">刷新</el-button>
+          <el-tag type="info" effect="plain">当前 {{ requests.length }} 条</el-tag>
         </div>
       </template>
 
@@ -186,8 +203,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -218,6 +236,9 @@ const rejectTargetId = ref<number | null>(null)
 const rejectReason = ref('')
 const actionLoadingId = ref<number | null>(null)
 const actionType = ref('')
+const pendingCount = computed(() => requests.value.filter((item) => item.status === 'pending_approval').length)
+const successCount = computed(() => requests.value.filter((item) => item.status === 'succeeded').length)
+const failedCount = computed(() => requests.value.filter((item) => item.status === 'failed').length)
 
 function formatTime(value: string | null) {
   return formatDateTime(value)
@@ -379,14 +400,22 @@ onMounted(() => {
 <style scoped>
 .change-requests-page {
   width: 100%;
-  padding-bottom: 20px;
+}
+
+.hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
 }
 
 .card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .page-title {
