@@ -1,31 +1,20 @@
 <template>
-  <div class="cos-discovery-container">
-    <el-card shadow="never" class="toolbar-card">
-      <div class="toolbar">
-        <div class="toolbar-copy">
-          <div class="page-title">COS 解析</div>
-          <div class="page-subtitle">查看腾讯云 COS 存储桶的自定义域名、源站类型与 CNAME 值。</div>
-          <div class="page-description">
-            账号密钥从配置中心读取；未配置域名的桶也会展示，域名相关字段留空。
-          </div>
-        </div>
-
-        <div class="toolbar-actions">
-          <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
-          <el-button type="primary" :loading="loading" :disabled="!configured" @click="loadDomains">
-            查询 COS
-          </el-button>
-          <el-button
-            v-if="authStore.isAdmin"
-            type="success"
-            plain
-            @click="router.push('/system-settings')"
-          >
-            去配置中心
-          </el-button>
-        </div>
+  <div class="cos-discovery-container page-stack">
+    <PageHero
+      eyebrow="OBJECT STORAGE"
+      title="COS 解析"
+      subtitle="查看腾讯云 COS 存储桶的自定义域名、源站类型与 CNAME 值，适合做对象存储域名盘点。"
+      tone="blue"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>桶 {{ bucketCount }} / 域名 {{ domainCount }}</el-tag>
+      </template>
+      <div class="hero-metrics">
+        <span>域名记录 {{ domainCount }}</span>
+        <span>存储桶 {{ bucketCount }}</span>
+        <span>跳过 {{ skippedBucketCount }}</span>
       </div>
-    </el-card>
+    </PageHero>
 
     <el-empty
       v-if="!configured"
@@ -34,19 +23,19 @@
     />
 
     <template v-else>
-      <div class="stats-grid">
-        <el-card shadow="hover" class="stat-card">
+      <div class="page-grid-3">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="域名记录数" :value="domainCount" />
         </el-card>
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="存储桶数" :value="bucketCount" />
         </el-card>
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <el-statistic title="已跳过桶数" :value="skippedBucketCount" />
         </el-card>
       </div>
 
-      <el-card shadow="never" class="table-card">
+      <el-card shadow="never" class="table-card data-card">
         <template #header>
           <div class="table-header">
             <div class="table-heading">
@@ -76,23 +65,37 @@
                   :value="size"
                 />
               </el-select>
+              <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!configured" @click="loadDomains">
+                查询 COS
+              </el-button>
+              <el-button
+                v-if="authStore.isAdmin"
+                type="success"
+                plain
+                @click="router.push('/system-settings')"
+              >
+                去配置中心
+              </el-button>
             </div>
           </div>
         </template>
 
-        <el-table
-          v-loading="loading"
-          :data="pagedDomainItems"
-          empty-text="暂无 COS 域名数据"
-          border
-          stripe
-          class="domain-table"
-        >
-          <el-table-column prop="bucket_name" label="存储桶名" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="custom_domain" label="自定义域名" min-width="280" show-overflow-tooltip />
-          <el-table-column prop="origin_type" label="源站类型" min-width="160" />
-          <el-table-column prop="cname" label="CNAME 值" min-width="360" show-overflow-tooltip />
-        </el-table>
+        <div class="table-shell">
+          <el-table
+            v-loading="loading"
+            :data="pagedDomainItems"
+            empty-text="暂无 COS 域名数据"
+            border
+            stripe
+            class="domain-table"
+          >
+            <el-table-column prop="bucket_name" label="存储桶名" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="custom_domain" label="自定义域名" min-width="280" show-overflow-tooltip />
+            <el-table-column prop="origin_type" label="源站类型" min-width="160" />
+            <el-table-column prop="cname" label="CNAME 值" min-width="360" show-overflow-tooltip />
+          </el-table>
+        </div>
 
         <div v-if="filteredDomainItems.length" class="pagination-wrap">
           <el-pagination
@@ -112,6 +115,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+import PageHero from '@/components/PageHero.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   getCosDiscoveryConfig,
@@ -205,63 +209,23 @@ onMounted(async () => {
 <style scoped>
 .cos-discovery-container {
   width: 100%;
-  padding-bottom: 20px;
 }
 
-.toolbar-card {
-  margin-bottom: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #f7fbff 0%, #ffffff 100%);
-}
-
-.toolbar {
+.hero-metrics {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
   flex-wrap: wrap;
-}
-
-.toolbar-copy {
-  max-width: 620px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.page-subtitle {
-  margin-top: 6px;
-  font-size: 14px;
-  color: #4b5563;
-}
-
-.page-description {
-  margin-top: 10px;
-  color: #6b7280;
-  line-height: 1.6;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
 }
 
 .stat-card,
 .table-card {
   border-radius: 18px;
+}
+
+.stat-card {
+  min-height: 126px;
 }
 
 .table-header {
@@ -310,6 +274,10 @@ onMounted(async () => {
   width: 110px;
 }
 
+.table-shell {
+  overflow-x: auto;
+}
+
 .domain-table :deep(.el-table__header th) {
   background: #f8fafc;
   color: #374151;
@@ -329,11 +297,6 @@ onMounted(async () => {
 }
 
 @media (max-width: 900px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .toolbar-actions,
   .table-tools {
     width: 100%;
   }
