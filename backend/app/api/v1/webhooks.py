@@ -389,6 +389,7 @@ async def handle_feishu_change_request_callback(
         app_secret = await system_setting_service.get_string(db, "FEISHU_BOT_APP_SECRET")
         stored_message_id = change_request.payload.get("feishu_message_id") if isinstance(change_request.payload, dict) else None
         message_id = stored_message_id or callback_message_id
+        updated_ok = False
         if app_id and app_secret and message_id:
             updated_ok = await notification_service.update_feishu_bot_interactive_message(
                 app_id=app_id,
@@ -406,6 +407,12 @@ async def handle_feishu_change_request_callback(
             toast_content = updated.error_message or "审批已通过，但执行失败"
         elif updated.status == change_request_service.STATUS_REJECTED:
             toast_content = "已拒绝该变更单"
+
+        if updated_ok:
+            return _build_feishu_action_response(
+                toast_type=toast_type,
+                toast_content=toast_content,
+            )
 
         return _build_feishu_action_response(
             toast_type=toast_type,

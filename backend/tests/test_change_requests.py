@@ -1498,7 +1498,7 @@ async def test_feishu_callback_updates_card_without_sending_extra_result_notific
 
 
 @pytest.mark.asyncio
-async def test_feishu_callback_returns_updated_card_even_when_bot_message_update_succeeds(
+async def test_feishu_callback_returns_toast_only_when_bot_message_update_succeeds(
     client,
     async_session,
     auth_headers,
@@ -1589,13 +1589,13 @@ async def test_feishu_callback_returns_updated_card_even_when_bot_message_update
 
     assert callback_resp.status_code == 200
     assert callback_resp.json()["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
+    assert "card" not in callback_resp.json()
     assert len(update_calls) == 1
     assert update_calls[0]["message_id"] == "om_stored_message_id"
 
 
 @pytest.mark.asyncio
-async def test_feishu_reject_callback_returns_updated_card_when_bot_message_update_succeeds(
+async def test_feishu_reject_callback_returns_toast_only_when_bot_message_update_succeeds(
     client,
     async_session,
     auth_headers,
@@ -1680,9 +1680,8 @@ async def test_feishu_reject_callback_returns_updated_card_when_bot_message_upda
 
     assert callback_resp.status_code == 200
     assert callback_resp.json()["toast"]["type"] == "success"
-    assert all(element["tag"] != "action" for element in callback_resp.json()["card"]["data"]["elements"])
+    assert "card" not in callback_resp.json()
     assert len(update_calls) == 1
-    assert "拒绝" in json.dumps(callback_resp.json()["card"]["data"], ensure_ascii=False)
 
 
 @pytest.mark.asyncio
