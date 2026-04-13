@@ -1,4 +1,4 @@
-import request from './request'
+import request, { cachedGet, invalidateCache } from './request'
 
 export interface DomainParams {
   platform?: string
@@ -14,14 +14,15 @@ export interface DomainParams {
   page_size?: number
 }
 
-export function getDomains(params: DomainParams) {
-  return request.get('/domains', { params })
+export function getDomains(params: DomainParams, force = false) {
+  return cachedGet('/domains', { params, force, ttl: 30_000 })
 }
 
-export function getDomainStats() {
-  return request.get('/domains/stats')
+export function getDomainStats(force = false) {
+  return cachedGet('/domains/stats', { force, ttl: 60_000 })
 }
 
 export function onboardDomainToCloudflare(domainId: number) {
+  invalidateCache('/domains')
   return request.post(`/domains/${domainId}/onboard-cloudflare`)
 }

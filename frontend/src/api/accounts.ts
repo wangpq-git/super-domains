@@ -1,4 +1,4 @@
-import request from './request'
+import request, { cachedGet, invalidateCache } from './request'
 
 export interface AccountData {
   platform: string
@@ -7,19 +7,22 @@ export interface AccountData {
   config?: Record<string, any>
 }
 
-export function getAccounts(params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number }) {
-  return request.get('/platforms', { params })
+export function getAccounts(params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number }, force = false) {
+  return cachedGet('/platforms', { params, force, ttl: 30_000 })
 }
 
 export function createAccount(data: any) {
+  invalidateCache('/platforms')
   return request.post('/platforms', data)
 }
 
 export function updateAccount(id: number, data: any) {
+  invalidateCache('/platforms')
   return request.put(`/platforms/${id}`, data)
 }
 
 export function deleteAccount(id: number) {
+  invalidateCache('/platforms')
   return request.delete(`/platforms/${id}`)
 }
 
@@ -28,9 +31,11 @@ export function testAccount(id: number) {
 }
 
 export function syncAccount(id: number) {
+  invalidateCache('/platforms')
   return request.post(`/platforms/${id}/sync`)
 }
 
 export function syncAllAccounts() {
+  invalidateCache('/platforms')
   return request.post('/platforms/sync-all', null, { timeout: 300000 })
 }

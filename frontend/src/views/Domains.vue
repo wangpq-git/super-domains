@@ -344,7 +344,7 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 }
 
 function handleRefresh() {
-  store.fetchDomains()
+  store.fetchDomains(true)
 }
 
 function handleDateChange(val: string[] | null) {

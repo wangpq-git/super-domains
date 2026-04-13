@@ -1,4 +1,4 @@
-import request from './request'
+import request, { cachedGet, invalidateCache } from './request'
 
 export interface AlertSchedule {
   type: string
@@ -37,26 +37,34 @@ export interface ExpiringDomain {
   account: string | null
 }
 
-export function getAlertRules() {
-  return request.get('/alerts/rules')
+export function getAlertRules(force = false) {
+  return cachedGet('/alerts/rules', { ttl: 60_000, force })
 }
 
 export function createAlertRule(data: AlertRuleData) {
+  invalidateCache('/alerts')
   return request.post('/alerts/rules', data)
 }
 
 export function updateAlertRule(id: number, data: Partial<AlertRuleData>) {
+  invalidateCache('/alerts')
   return request.put(`/alerts/rules/${id}`, data)
 }
 
 export function deleteAlertRule(id: number) {
+  invalidateCache('/alerts')
   return request.delete(`/alerts/rules/${id}`)
 }
 
 export function checkAlerts() {
+  invalidateCache('/alerts')
   return request.post('/alerts/check')
 }
 
-export function getExpiringDomains(days: number = 30, page = 1, pageSize = 20) {
-  return request.get('/alerts/expiring', { params: { days, page, page_size: pageSize } })
+export function getExpiringDomains(days: number = 30, page = 1, pageSize = 20, force = false) {
+  return cachedGet('/alerts/expiring', {
+    params: { days, page, page_size: pageSize },
+    ttl: 60_000,
+    force,
+  })
 }

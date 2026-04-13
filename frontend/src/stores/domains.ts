@@ -22,10 +22,10 @@ export const useDomainsStore = defineStore('domains', () => {
     page_size: 20,
   })
 
-  async function fetchDomains() {
+  async function fetchDomains(force = false) {
     loading.value = true
     try {
-      const { data } = await getDomains(filters.value)
+      const { data } = await getDomains(filters.value, force)
       domains.value = data.items ?? data.data ?? []
       total.value = data.total ?? domains.value.length
     } finally {
@@ -33,9 +33,9 @@ export const useDomainsStore = defineStore('domains', () => {
     }
   }
 
-  async function fetchStats() {
+  async function fetchStats(force = false) {
     try {
-      const { data } = await getDomainStats()
+      const { data } = await getDomainStats(force)
       stats.value = data
     } catch {
       stats.value = null

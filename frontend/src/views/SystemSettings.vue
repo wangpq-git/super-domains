@@ -15,7 +15,7 @@
         <span>当前分类 {{ activeCategoryLabel }}</span>
       </div>
       <template #actions>
-        <el-button @click="loadSettings">刷新</el-button>
+        <el-button @click="loadSettings(true)">刷新</el-button>
         <el-button type="primary" :loading="saving" @click="saveCurrentCategory">保存当前分类</el-button>
       </template>
     </PageHero>
@@ -203,10 +203,10 @@ function secretPlaceholder(item: SystemSettingItem) {
   return item.masked_value ? '留空表示保持当前密钥' : '请输入敏感配置'
 }
 
-async function loadSettings() {
+async function loadSettings(force = false) {
   loading.value = true
   try {
-    const { data } = await getSystemSettings()
+    const { data } = await getSystemSettings(force)
     settings.value = data.items || []
     buildDrafts(settings.value)
   } catch (error: any) {

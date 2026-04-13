@@ -1,4 +1,4 @@
-import request from '@/api/request'
+import request, { cachedGet, invalidateCache } from '@/api/request'
 
 export interface ChangeRequest {
   id: number
@@ -44,18 +44,21 @@ export interface ChangeRequestListParams {
   keyword?: string
 }
 
-export function getChangeRequests(params: ChangeRequestListParams = {}) {
-  return request.get<ChangeRequestListResponse>('/change-requests', { params })
+export function getChangeRequests(params: ChangeRequestListParams = {}, force = false) {
+  return cachedGet<ChangeRequestListResponse>('/change-requests', { params, ttl: 20_000, force })
 }
 
 export function approveChangeRequest(requestId: number) {
+  invalidateCache('/change-requests')
   return request.post<ChangeRequest>(`/change-requests/${requestId}/approve`)
 }
 
 export function rejectChangeRequest(requestId: number, reason: string) {
+  invalidateCache('/change-requests')
   return request.post<ChangeRequest>(`/change-requests/${requestId}/reject`, { reason })
 }
 
 export function cancelChangeRequest(requestId: number) {
+  invalidateCache('/change-requests')
   return request.post<ChangeRequest>(`/change-requests/${requestId}/cancel`)
 }

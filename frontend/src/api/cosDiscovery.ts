@@ -1,4 +1,4 @@
-import request from './request'
+import { cachedGet, invalidateCache } from './request'
 
 export interface CosDiscoveryConfigResponse {
   configured: boolean
@@ -16,12 +16,14 @@ export interface CosDiscoveryDomainListResponse {
   skipped_bucket_count: number
 }
 
-export function getCosDiscoveryConfig() {
-  return request.get<CosDiscoveryConfigResponse>('/cos-discovery/config')
+export function getCosDiscoveryConfig(force = false) {
+  return cachedGet<CosDiscoveryConfigResponse>('/cos-discovery/config', { force, ttl: 300_000 })
 }
 
-export function getCosDomains() {
-  return request.get<CosDiscoveryDomainListResponse>('/cos-discovery/domains', {
-    timeout: 120000,
-  })
+export function getCosDomains(force = false) {
+  return cachedGet<CosDiscoveryDomainListResponse>('/cos-discovery/domains', { force, ttl: 60_000 })
+}
+
+export function invalidateCosDiscoveryCache() {
+  invalidateCache('/cos-discovery')
 }

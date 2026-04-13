@@ -87,10 +87,10 @@ function formatTime(val: string): string {
   return formatDateTime(val)
 }
 
-async function fetchUsers() {
+async function fetchUsers(force = false) {
   loading.value = true
   try {
-    const { data } = await getUsers()
+    const { data } = await getUsers(force)
     users.value = data ?? []
   } catch {
     users.value = []

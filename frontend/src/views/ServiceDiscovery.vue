@@ -76,8 +76,8 @@
                   :value="size"
                 />
               </el-select>
-              <el-button :loading="loadingConfig" @click="loadConfig">刷新配置</el-button>
-              <el-button type="primary" :loading="loading" :disabled="!selectedNamespace" @click="loadIngresses">
+              <el-button :loading="loadingConfig" @click="loadConfig(true)">刷新配置</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!selectedNamespace" @click="loadIngresses(true)">
                 查询 Ingress
               </el-button>
               <el-button
@@ -197,10 +197,10 @@ function handlePageSizeChange() {
   currentPage.value = 1
 }
 
-async function loadConfig() {
+async function loadConfig(force = false) {
   loadingConfig.value = true
   try {
-    const { data } = await getServiceDiscoveryConfig()
+    const { data } = await getServiceDiscoveryConfig(force)
     configured.value = data.configured
     namespaceOptions.value = data.namespace_options || []
 
@@ -223,7 +223,7 @@ async function loadConfig() {
   }
 }
 
-async function loadIngresses() {
+async function loadIngresses(force = false) {
   if (!selectedNamespace.value) {
     ElMessage.warning('请先选择命名空间')
     return
@@ -231,7 +231,7 @@ async function loadIngresses() {
 
   loading.value = true
   try {
-    const { data } = await getServiceIngresses(selectedNamespace.value)
+    const { data } = await getServiceIngresses(selectedNamespace.value, force)
     ingressItems.value = data.items || []
     keyword.value = ''
     currentPage.value = 1

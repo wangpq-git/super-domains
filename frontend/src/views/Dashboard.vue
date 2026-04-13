@@ -84,6 +84,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { CircleClose, Connection, Monitor, Warning } from '@element-plus/icons-vue'
 import { use } from 'echarts/core'
 import { PieChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'

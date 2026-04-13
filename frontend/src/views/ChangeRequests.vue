@@ -15,7 +15,7 @@
         <span>失败 {{ failedCount }}</span>
       </div>
       <template #actions>
-        <el-button type="primary" :loading="loading" @click="fetchChangeRequests">刷新</el-button>
+        <el-button type="primary" :loading="loading" @click="fetchChangeRequests(true)">刷新</el-button>
       </template>
     </PageHero>
 
@@ -291,7 +291,7 @@ function riskTagType(level: string) {
   return mapping[level] || 'info'
 }
 
-async function fetchChangeRequests() {
+async function fetchChangeRequests(force = false) {
   loading.value = true
   try {
     const { data } = await getChangeRequests({
@@ -300,7 +300,7 @@ async function fetchChangeRequests() {
       status: filters.value.status || undefined,
       operation_type: filters.value.operation_type || undefined,
       keyword: filters.value.keyword.trim() || undefined,
-    })
+    }, force)
     requests.value = data.items || []
     pagination.value.total = data.total
   } catch (e: any) {

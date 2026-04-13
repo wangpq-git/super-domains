@@ -120,6 +120,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import {
+  ArrowDown,
+  Bell,
+  Connection,
+  DataAnalysis,
+  Expand,
+  Files,
+  Fold,
+  Monitor,
+  Setting,
+  Share,
+  SwitchButton,
+  Tickets,
+  Tools,
+  User,
+  UserFilled,
+} from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()

@@ -32,6 +32,7 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
+import { InfoFilled, Monitor } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'

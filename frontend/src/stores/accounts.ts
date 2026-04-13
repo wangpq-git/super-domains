@@ -11,7 +11,7 @@ export const useAccountsStore = defineStore('accounts', () => {
   const page = ref(1)
   const pageSize = ref(20)
 
-  async function fetchAccounts() {
+  async function fetchAccounts(force = false) {
     loading.value = true
     try {
       const { data } = await getAccounts({
@@ -19,7 +19,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         sort_order: sortOrder.value,
         page: page.value,
         page_size: pageSize.value,
-      })
+      }, force)
       accounts.value = data.items ?? data.data ?? data ?? []
       total.value = data.total ?? accounts.value.length
     } finally {
