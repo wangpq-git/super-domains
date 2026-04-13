@@ -79,6 +79,10 @@ export function formatDateTime(isoStr: string | null | undefined): string {
 
 /** Format ISO date string to YYYY-MM-DD */
 export function formatDate(isoStr: string | null | undefined): string {
+  const parsed = parseApiDate(isoStr)
+  if (!parsed) return isoStr || '-'
+  if (parsed.getUTCFullYear() >= 9999) return '-'
+
   return formatInBeijing(isoStr, {
     year: 'numeric',
     month: '2-digit',

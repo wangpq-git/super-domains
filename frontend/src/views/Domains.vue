@@ -35,10 +35,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 120px" @change="handleFilter">
-            <el-option label="活跃" value="active" />
-            <el-option label="已过期" value="expired" />
-            <el-option label="待续费" value="pending" />
+          <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 140px" @change="handleFilter">
+            <el-option label="正常" value="active" />
+            <el-option label="已暂停" value="suspended" />
+            <el-option label="停用" value="inactive" />
+            <el-option label="已锁定" value="locked" />
+            <el-option label="待处理" value="pending" />
           </el-select>
         </el-form-item>
         <el-form-item label="到期日期">
@@ -235,18 +237,44 @@ function removeNs(idx: number) {
 }
 
 function statusLabel(status: string): string {
-  const map: Record<string, string> = { active: '正常', expired: '已过期', pending: '待处理', locked: '已锁定', removed: '已移除' }
+  const map: Record<string, string> = {
+    active: '正常',
+    registered: '正常',
+    expired: '已过期',
+    pending: '待处理',
+    locked: '已锁定',
+    removed: '已移除',
+    inactive: '停用',
+    suspended: '已暂停',
+    redemption: '赎回期',
+    transferring: '转移中',
+  }
   return map[status] ?? status
 }
 
 function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
-  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = { active: 'success', expired: 'danger', pending: 'info', locked: 'warning', removed: 'info' }
+  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+    active: 'success',
+    registered: 'success',
+    expired: 'danger',
+    pending: 'warning',
+    locked: 'warning',
+    removed: 'info',
+    inactive: 'info',
+    suspended: 'danger',
+    redemption: 'danger',
+    transferring: 'warning',
+  }
   return map[status] ?? 'info'
 }
 
 function expiryClass(dateStr: string): string {
   if (!dateStr) return ''
-  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000)
+  const parsed = new Date(dateStr)
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() >= 9999) {
+    return ''
+  }
+  const diff = Math.ceil((parsed.getTime() - Date.now()) / 86400000)
   if (diff < 0) return 'expiry-expired'
   if (diff <= 7) return 'expiry-danger'
   if (diff <= 30) return 'expiry-warning'

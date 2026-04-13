@@ -115,17 +115,33 @@ class PorkbunAdapter(BasePlatformAdapter):
             expiry_date = None
             registration_date = None
 
-            if domain_data.get("expirydate"):
+            expiry_value = (
+                domain_data.get("expirydate")
+                or domain_data.get("expireDate")
+                or domain_data.get("expirationDate")
+            )
+            if expiry_value:
                 try:
-                    expiry_date = datetime.strptime(domain_data["expirydate"], "%Y-%m-%d")
+                    expiry_date = datetime.strptime(str(expiry_value), "%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    pass
+                    try:
+                        expiry_date = datetime.strptime(str(expiry_value), "%Y-%m-%d")
+                    except Exception:
+                        pass
 
-            if domain_data.get("createdate"):
+            registration_value = (
+                domain_data.get("createdate")
+                or domain_data.get("createDate")
+                or domain_data.get("registrationDate")
+            )
+            if registration_value:
                 try:
-                    registration_date = datetime.strptime(domain_data["createdate"], "%Y-%m-%d")
+                    registration_date = datetime.strptime(str(registration_value), "%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    pass
+                    try:
+                        registration_date = datetime.strptime(str(registration_value), "%Y-%m-%d")
+                    except Exception:
+                        pass
 
             if not expiry_date:
                 expiry_date = datetime.max.replace(tzinfo=None)

@@ -236,6 +236,12 @@ class SpaceshipAdapter(BasePlatformAdapter):
                     or item.get("created")
                 )
                 status_raw = str(item.get("status") or item.get("lifecycleStatus") or "active").lower()
+                suspensions = item.get("suspensions") if isinstance(item.get("suspensions"), list) else []
+                epp_statuses = [
+                    str(value).strip().lower()
+                    for value in (item.get("eppStatuses") or [])
+                    if str(value).strip()
+                ]
                 auto_renew = item.get("auto_renew", item.get("autoRenew", item.get("autorenew", False)))
                 locked = item.get("locked", item.get("is_locked", bool(item.get("eppStatuses"))))
                 privacy = item.get(
@@ -243,18 +249,26 @@ class SpaceshipAdapter(BasePlatformAdapter):
                     item.get("privacy", item.get("privacyProtection", item.get("contactForm", False)))
                 )
 
+                normalized_status = {
+                    "active": "active",
+                    "registered": "active",
+                    "ok": "active",
+                    "inactive": "inactive",
+                    "expired": "expired",
+                    "pending": "pending",
+                    "pendingdelete": "expired",
+                    "renewalfailed": "pending",
+                    "locked": "locked",
+                    "redemption": "redemption",
+                    "transferring": "transferring",
+                }.get(status_raw.replace("-", "").replace("_", ""), status_raw or "active")
+                if suspensions or any(status.endswith("hold") for status in epp_statuses):
+                    normalized_status = "suspended"
+
                 domains.append(DomainInfo(
                     name=name,
                     tld=name.rsplit(".", 1)[-1] if "." in name else "",
-                    status={
-                        "active": "active",
-                        "inactive": "inactive",
-                        "expired": "expired",
-                        "pending": "pending",
-                        "locked": "locked",
-                        "redemption": "redemption",
-                        "transferring": "transferring",
-                    }.get(status_raw, status_raw or "active"),
+                    status=normalized_status,
                     registration_date=reg_date,
                     expiry_date=expiry_date,
                     auto_renew=self._to_bool(auto_renew),
@@ -300,6 +314,15 @@ class SpaceshipAdapter(BasePlatformAdapter):
     def _normalize_nameservers(self, value: Any) -> List[str]:
         if not value:
             return []
+        if isinstance(value, dict):
+            value = (
+                value.get("hosts")
+                or value.get("nameservers")
+                or value.get("items")
+                or value.get("values")
+                or value.get("nameServers")
+                or value.get("records")
+            )
         if isinstance(value, str):
             value = [value]
         if not isinstance(value, list):
