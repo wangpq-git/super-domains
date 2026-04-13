@@ -35,20 +35,6 @@ export default defineConfig({
           if (id.includes('echarts') || id.includes('zrender') || id.includes('vue-echarts')) {
             return 'charts-vendor'
           }
-
-          if (id.includes('@element-plus/icons-vue')) {
-            return 'element-icons'
-          }
-
-          if (id.includes('element-plus') || id.includes('@ctrl/tinycolor')) {
-            return 'element-plus'
-          }
-
-          if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
-            return 'vue-core'
-          }
-
-          return 'vendor'
         },
       }
     }

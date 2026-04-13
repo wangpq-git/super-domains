@@ -52,49 +52,17 @@
       </el-card>
     </section>
 
-    <section class="page-grid-3 dashboard-charts">
-      <el-card shadow="never" class="chart-card chart-card--wide">
-        <template #header>
-          <div>
-            <h3 class="section-title">域名平台分布</h3>
-            <p class="section-subtitle">观察域名在哪些平台集中，便于后续同步和权限收口。</p>
-          </div>
-        </template>
-        <div class="chart-wrapper">
-          <v-chart v-if="stats?.by_platform" :option="pieOption" autoresize class="chart-canvas" />
-          <el-empty v-else description="暂无平台分布数据" />
-        </div>
-      </el-card>
-
-      <el-card shadow="never" class="chart-card chart-card--wide">
-        <template #header>
-          <div>
-            <h3 class="section-title">到期时间分布</h3>
-            <p class="section-subtitle">快速判断近期续费窗口是否集中，避免集中到期造成风险。</p>
-          </div>
-        </template>
-        <div class="chart-wrapper">
-          <v-chart v-if="stats?.by_expiry" :option="barOption" autoresize class="chart-canvas" />
-          <el-empty v-else description="暂无到期分布数据" />
-        </div>
-      </el-card>
-    </section>
+    <DashboardCharts v-if="stats" :stats="stats" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { CircleClose, Connection, Monitor, Warning } from '@element-plus/icons-vue'
-import { use } from 'echarts/core'
-import { PieChart, BarChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
-import VChart from 'vue-echarts'
 import PageHero from '@/components/PageHero.vue'
 import { useDomainsStore } from '@/stores/domains'
-import { platformLabel } from '@/utils/format'
 
-use([PieChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+const DashboardCharts = defineAsyncComponent(() => import('@/components/DashboardCharts.vue'))
 
 const store = useDomainsStore()
 const loading = ref(false)
@@ -114,45 +82,6 @@ const nextAction = computed(() => {
   return '继续补齐平台接入'
 })
 
-const platformColors: Record<string, string> = {
-  cloudflare: '#f6821f',
-  namecom: '#42b983',
-  dynadot: '#5470c6',
-  godaddy: '#1db954',
-  namecheap: '#de4040',
-  namesilo: '#6366f1',
-  openprovider: '#0ea5e9',
-  porkbun: '#ec4899',
-  spaceship: '#8b5cf6',
-}
-
-const pieOption = computed(() => {
-  const data = store.stats?.by_platform
-  if (!data) return {}
-  const seriesData = Object.entries(data).map(([name, value]) => ({
-    name: platformLabel(name),
-    value: value as number,
-    itemStyle: { color: platformColors[name] || '#909399' },
-  }))
-  return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0 },
-    series: [{ type: 'pie', radius: ['42%', '72%'], avoidLabelOverlap: true, itemStyle: { borderRadius: 8 }, label: { show: true, formatter: '{b}\n{d}%' }, data: seriesData }],
-  }
-})
-
-const barOption = computed(() => {
-  const data = store.stats?.by_expiry
-  if (!data) return {}
-  return {
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: Object.keys(data), axisTick: { show: false } },
-    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#e2e8f0' } } },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    series: [{ type: 'bar', data: Object.values(data).map(Number), barMaxWidth: 42, itemStyle: { borderRadius: [8, 8, 0, 0], color: '#4361ee' } }],
-  }
-})
-
 onMounted(async () => {
   loading.value = true
   try {
@@ -168,8 +97,7 @@ onMounted(async () => {
   width: 100%;
 }
 
-.dashboard-insights,
-.dashboard-charts {
+.dashboard-insights {
   align-items: stretch;
 }
 
@@ -231,37 +159,9 @@ onMounted(async () => {
   line-height: 1.6;
 }
 
-.chart-card {
-  min-height: 420px;
-}
-
-.chart-card--wide {
-  grid-column: span 1;
-}
-
-.chart-wrapper {
-  min-height: 340px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chart-canvas {
-  height: 360px;
-  width: 100%;
-}
-
 @media (max-width: 768px) {
   .insight-card {
     min-height: auto;
-  }
-
-  .chart-card {
-    min-height: auto;
-  }
-
-  .chart-canvas {
-    height: 300px;
   }
 }
 </style>

@@ -1,7 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import MainLayout from '@/layouts/MainLayout.vue'
-
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -11,7 +9,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    component: MainLayout,
+    component: () => import('@/layouts/MainLayout.vue'),
     redirect: '/dashboard',
     meta: { requiresAuth: true },
     children: [
