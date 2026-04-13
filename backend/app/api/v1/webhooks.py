@@ -192,9 +192,16 @@ def _build_idempotent_callback_response(
             f"{' 错误: ' + change_request.error_message if change_request.error_message else ''}"
         ),
     }
+    card = change_request_service.build_feishu_change_request_card(
+        change_request,
+        include_actions=False,
+        result_note=result_note_map.get(change_request.status),
+        base_url=base_url,
+    )
     return _build_feishu_action_response(
         toast_type="info",
         toast_content=status_text_map.get(change_request.status, "该变更单已处理，无需重复操作"),
+        card=card,
     )
 
 
@@ -343,11 +350,9 @@ async def handle_feishu_change_request_callback(
                 callback["actor_identifiers"],
                 sorted(body.get("event", {}).keys()) if isinstance(body.get("event"), dict) else None,
             )
-            return _build_feishu_noop_response()
+            return _build_feishu_error_response("审批人未授权")
 
         base_url = await system_setting_service.get_string(db, "FEISHU_APPROVAL_BASE_URL")
-        approver_name = approver.display_name or approver.username
-
         try:
             if action == "approve":
                 updated = await change_request_service.approve_change_request(
@@ -356,7 +361,6 @@ async def handle_feishu_change_request_callback(
                     approver,
                     send_result_notification=False,
                 )
-                result_note = f"已由 {approver_name} 审批通过。"
             elif action == "reject":
                 updated = await change_request_service.reject_change_request(
                     db,
@@ -365,17 +369,15 @@ async def handle_feishu_change_request_callback(
                     reason or "Rejected from Feishu callback",
                     send_result_notification=False,
                 )
-                result_note = (
-                    f"已由 {approver_name} 拒绝。"
-                    f"{' 原因: ' + updated.rejection_reason if updated.rejection_reason else ''}"
-                )
             else:
                 return _build_feishu_noop_response()
         except ValueError:
             refreshed = await change_request_service.get_change_request_by_id(db, request_id_int)
             if refreshed and change_request_service.is_change_request_processed(refreshed):
-                return _build_feishu_noop_response()
+                return _build_idempotent_callback_response(refreshed, approver, base_url=base_url)
             return _build_feishu_noop_response()
+
+        result_note = change_request_service.build_change_request_result_note(updated)
 
         updated_card = change_request_service.build_feishu_change_request_card(
             updated,
@@ -397,10 +399,19 @@ async def handle_feishu_change_request_callback(
             if not updated_ok:
                 logger.warning("Failed to update Feishu message via API for request_id=%s", request_id_int)
 
-        # The callback only needs to acknowledge the action with a toast.
-        # We already patch the message via Feishu API above; omitting the inline
-        # card payload avoids client-side callback rendering errors.
-        return _build_feishu_noop_response()
+        toast_content = "审批已通过，执行成功"
+        toast_type = "success"
+        if updated.status == change_request_service.STATUS_FAILED:
+            toast_type = "error"
+            toast_content = updated.error_message or "审批已通过，但执行失败"
+        elif updated.status == change_request_service.STATUS_REJECTED:
+            toast_content = "已拒绝该变更单"
+
+        return _build_feishu_action_response(
+            toast_type=toast_type,
+            toast_content=toast_content,
+            card=updated_card,
+        )
     except HTTPException as exc:
         logger.warning("Feishu callback handled with non-fatal error: %s", exc.detail)
         return _build_feishu_noop_response()
