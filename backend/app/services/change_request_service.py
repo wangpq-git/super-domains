@@ -293,7 +293,10 @@ def build_feishu_change_request_card(
         }
     )
     return {
-        "config": {"wide_screen_mode": True},
+        "config": {
+            "wide_screen_mode": True,
+            "update_multi": True,
+        },
         "header": {
             "template": header_template,
             "title": {"tag": "plain_text", "content": f"{operation_label} · {status_label}"},
