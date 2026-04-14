@@ -215,6 +215,7 @@ const editId = ref<number | null>(null)
 const submitting = ref(false)
 const syncingAll = ref(false)
 const syncTask = ref<any>({ state: 'idle' })
+const lastSyncTaskTerminalKey = ref('')
 let syncStatusTimer: number | null = null
 
 const platforms = [
@@ -492,6 +493,19 @@ async function fetchSyncStatus() {
     if (data.state === 'succeeded' || data.state === 'failed' || data.state === 'idle') {
       stopSyncStatusPolling()
       if (data.state === 'succeeded' || data.state === 'failed') {
+        const terminalKey = `${data.task_id || 'none'}:${data.state}:${data.completed || 0}:${data.failed || 0}`
+        if (lastSyncTaskTerminalKey.value !== terminalKey) {
+          lastSyncTaskTerminalKey.value = terminalKey
+          if (data.state === 'succeeded') {
+            if (Number(data.total || 0) > 0) {
+              ElMessage.success(`批量同步完成：${data.success || 0} 成功，${data.failed || 0} 失败`)
+            } else {
+              ElMessage.warning('没有可同步的启用账户')
+            }
+          } else {
+            ElMessage.error(data.message || '批量同步失败')
+          }
+        }
         store.fetchAccounts(true)
       }
     }
