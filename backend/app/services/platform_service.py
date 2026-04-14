@@ -1,4 +1,4 @@
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_account import PlatformAccount
@@ -14,8 +14,11 @@ async def list_accounts(
     page: int = 1,
     page_size: int = 20,
     platform: str | None = None,
+    sync_status: str | None = None,
+    keyword: str | None = None,
 ) -> dict:
     ALLOWED_SORT_FIELDS = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
+    normalized_keyword = (keyword or "").strip()
     if sort_by in ALLOWED_SORT_FIELDS:
         col = getattr(PlatformAccount, sort_by)
         order_col = col.desc() if sort_order == "desc" else col.asc()
@@ -25,6 +28,12 @@ async def list_accounts(
     filters = []
     if platform:
         filters.append(PlatformAccount.platform == platform)
+    if sync_status == "never":
+        filters.append(or_(PlatformAccount.sync_status.is_(None), PlatformAccount.sync_status == ""))
+    elif sync_status:
+        filters.append(PlatformAccount.sync_status == sync_status)
+    if normalized_keyword:
+        filters.append(PlatformAccount.account_name.ilike(f"%{normalized_keyword}%"))
 
     total_query = select(func.count()).select_from(PlatformAccount)
     if filters:

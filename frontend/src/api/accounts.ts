@@ -15,7 +15,15 @@ function invalidateAccountRelatedCache() {
 }
 
 export function getAccounts(
-  params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number; platform?: string },
+  params?: {
+    sort_by?: string
+    sort_order?: string
+    page?: number
+    page_size?: number
+    platform?: string
+    sync_status?: string
+    keyword?: string
+  },
   force = false,
 ) {
   return cachedGet('/platforms', { params, force, ttl: 30_000 })
