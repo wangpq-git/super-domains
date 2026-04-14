@@ -9,12 +9,13 @@ import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.encryption import encrypt_credentials
 from app.models.change_request import ChangeRequest
 from app.models.dns_record import DnsRecord
 from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
 from app.models.user import User
-from app.services import change_request_service, dns_service
+from app.services import change_request_service, cloudflare_onboarding_service, dns_service
 from app.services.change_request_service import build_feishu_change_request_card
 
 
@@ -575,6 +576,123 @@ async def test_list_change_requests_supports_filters_and_pagination(client, asyn
 
 
 @pytest.mark.asyncio
+async def test_create_cloudflare_onboard_request_selects_least_loaded_account(client, async_session, auth_headers):
+    source_account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-source",
+        credentials=encrypt_credentials({"api_key": "dynadot-key"}),
+        is_active=True,
+    )
+    target_busy = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-busy",
+        credentials=encrypt_credentials({"api_token": "busy-token"}),
+        is_active=True,
+    )
+    target_light = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-light",
+        credentials=encrypt_credentials({"api_token": "light-token"}),
+        is_active=True,
+    )
+    async_session.add_all([source_account, target_busy, target_light])
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=source_account.id,
+        domain_name="onboard.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    for idx in range(3):
+        async_session.add(
+            Domain(
+                account_id=target_busy.id,
+                domain_name=f"busy-{idx}.example.com",
+                status="active",
+                expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+                nameservers=["a.ns.cloudflare.com", "b.ns.cloudflare.com"],
+            )
+        )
+    async_session.add(
+        Domain(
+            account_id=target_light.id,
+            domain_name="light-only.example.com",
+            status="active",
+            expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+            nameservers=["a.ns.cloudflare.com", "b.ns.cloudflare.com"],
+        )
+    )
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        f"/api/v1/domains/{domain.id}/onboard-cloudflare",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "pending_approval"
+    assert data["operation_type"] == "cloudflare_onboard"
+    assert data["payload"]["target_account_id"] == target_light.id
+    assert data["payload"]["cache_rule"]["expression"] == cloudflare_onboarding_service.CACHE_RULE_EXPRESSION
+
+
+@pytest.mark.asyncio
+async def test_create_cloudflare_onboard_request_returns_quota_error_when_all_accounts_exceed_limit(
+    client,
+    async_session,
+    auth_headers,
+):
+    source_account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-source",
+        credentials=encrypt_credentials({"api_key": "dynadot-key"}),
+        is_active=True,
+    )
+    target_account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-over-limit",
+        credentials=encrypt_credentials({"api_token": "over-token"}),
+        is_active=True,
+    )
+    async_session.add_all([source_account, target_account])
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=source_account.id,
+        domain_name="quota.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    for idx in range(86):
+        async_session.add(
+            Domain(
+                account_id=target_account.id,
+                domain_name=f"over-limit-{idx}.example.com",
+                status="active",
+                expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+                nameservers=["a.ns.cloudflare.com", "b.ns.cloudflare.com"],
+            )
+        )
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    resp = await client.post(
+        f"/api/v1/domains/{domain.id}/onboard-cloudflare",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "cloudflare 额度不足"
+
+
+@pytest.mark.asyncio
 async def test_approve_change_request_executes_dns_create(client, async_session, auth_headers, monkeypatch):
     account = PlatformAccount(
         platform="cloudflare",
@@ -623,6 +741,90 @@ async def test_approve_change_request_executes_dns_create(client, async_session,
     assert data["status"] == "succeeded"
     assert data["execution_result"]["record_id"] == 321
     assert data["approver_user_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_approve_change_request_executes_cloudflare_onboard(client, async_session, auth_headers, monkeypatch):
+    source_account = PlatformAccount(
+        platform="dynadot",
+        account_name="dynadot-source",
+        credentials=encrypt_credentials({"api_key": "dynadot-key"}),
+        is_active=True,
+    )
+    target_account = PlatformAccount(
+        platform="cloudflare",
+        account_name="cf-target",
+        credentials=encrypt_credentials({"api_token": "cf-token", "account_id": "cf-account-id"}),
+        is_active=True,
+    )
+    async_session.add_all([source_account, target_account])
+    await async_session.flush()
+
+    domain = Domain(
+        account_id=source_account.id,
+        domain_name="migrate.example.com",
+        status="active",
+        expiry_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
+        nameservers=["ns1.dynadot.com", "ns2.dynadot.com"],
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    await async_session.refresh(domain)
+
+    async def fake_create_zone(self, domain_name):
+        assert domain_name == "migrate.example.com"
+        return {
+            "id": "zone-123",
+            "name": domain_name,
+            "status": "pending",
+            "name_servers": ["iris.ns.cloudflare.com", "miles.ns.cloudflare.com"],
+        }
+
+    async def fake_ensure_cache_rule(self, zone_id, *, rule_name, expression, settings, position):
+        assert zone_id == "zone-123"
+        assert rule_name == cloudflare_onboarding_service.CACHE_RULE_NAME
+        assert expression == cloudflare_onboarding_service.CACHE_RULE_EXPRESSION
+        assert settings["edge_ttl"]["default"] == 86400
+        assert settings["browser_ttl"]["default"] == 43200
+        assert settings["cache_key"]["cache_by_device_type"] is True
+        assert position == "first"
+        return {
+            "id": "rule-123",
+            "description": rule_name,
+            "expression": expression,
+        }
+
+    async def fake_update_nameservers(self, domain_name, nameservers):
+        assert domain_name == "migrate.example.com"
+        assert nameservers == ["iris.ns.cloudflare.com", "miles.ns.cloudflare.com"]
+        return True
+
+    monkeypatch.setattr("app.adapters.cloudflare.CloudflareAdapter.create_zone", fake_create_zone)
+    monkeypatch.setattr("app.adapters.cloudflare.CloudflareAdapter.ensure_cache_rule", fake_ensure_cache_rule)
+    monkeypatch.setattr("app.adapters.dynadot.DynadotAdapter.update_nameservers", fake_update_nameservers)
+
+    create_resp = await client.post(
+        f"/api/v1/domains/{domain.id}/onboard-cloudflare",
+        headers=auth_headers,
+    )
+    request_id = create_resp.json()["id"]
+
+    approve_resp = await client.post(
+        f"/api/v1/change-requests/{request_id}/approve",
+        headers=auth_headers,
+    )
+
+    assert approve_resp.status_code == 200
+    data = approve_resp.json()
+    assert data["status"] == "succeeded"
+    assert data["execution_result"]["zone_id"] == "zone-123"
+    assert data["execution_result"]["nameservers"] == ["iris.ns.cloudflare.com", "miles.ns.cloudflare.com"]
+    assert data["execution_result"]["cache_rule"]["expression"] == cloudflare_onboarding_service.CACHE_RULE_EXPRESSION
+
+    await async_session.refresh(domain)
+    assert domain.account_id == target_account.id
+    assert domain.external_id == "zone-123"
+    assert domain.nameservers == ["iris.ns.cloudflare.com", "miles.ns.cloudflare.com"]
 
 
 @pytest.mark.asyncio

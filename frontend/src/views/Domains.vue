@@ -142,6 +142,18 @@
             <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.platform === 'dynadot'"
+              type="primary"
+              link
+              @click="handleOnboardToCloudflare(row)"
+            >
+              接入 Cloudflare
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div class="pagination-wrapper">
@@ -188,6 +200,7 @@ import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
 import { useAuthStore } from '@/stores/auth'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
+import { onboardDomainToCloudflare } from '@/api/domains'
 import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
 interface DomainRow {
@@ -361,6 +374,15 @@ async function handleBatchNs() {
     ElMessage.error('批量修改NS失败')
   } finally {
     batchLoading.value = false
+  }
+}
+
+async function handleOnboardToCloudflare(row: DomainRow) {
+  try {
+    const { data } = await onboardDomainToCloudflare(row.id)
+    ElMessage.success(`接入 Cloudflare 已提交审批：${data.request_no}`)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '提交接入申请失败')
   }
 }
 

@@ -31,7 +31,7 @@ class CloudflareAdapter(BasePlatformAdapter):
         else:
             raise ValueError("Cloudflare requires 'api_key' + 'email' or 'api_token'")
 
-    async def _request(self, method: str, path: str, **kwargs) -> dict:
+    async def _request_response(self, method: str, path: str, **kwargs) -> httpx.Response:
         async with self._rate_limiter:
             url = f"{self.BASE_URL}{path}"
             headers = self._get_headers()
@@ -48,17 +48,21 @@ class CloudflareAdapter(BasePlatformAdapter):
                     pass
                 response.raise_for_status()
 
-            try:
-                data = response.json()
-            except Exception:
-                data = {}
+            return response
 
-            if not data.get("success", True):
-                errors = data.get("errors", [])
-                error_msg = "; ".join([e.get("message", str(e)) for e in errors])
-                raise RuntimeError(f"Cloudflare API error: {error_msg}")
+    async def _request(self, method: str, path: str, **kwargs) -> dict:
+        response = await self._request_response(method, path, **kwargs)
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
 
-            return data
+        if not data.get("success", True):
+            errors = data.get("errors", [])
+            error_msg = "; ".join([e.get("message", str(e)) for e in errors])
+            raise RuntimeError(f"Cloudflare API error: {error_msg}")
+
+        return data
 
     async def authenticate(self) -> bool:
         if "api_token" in self.credentials:
@@ -208,6 +212,84 @@ class CloudflareAdapter(BasePlatformAdapter):
             page += 1
 
         return records
+
+    async def create_zone(self, domain: str) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "name": domain,
+            "type": "full",
+            "jump_start": False,
+        }
+        account_id = self.credentials.get("account_id")
+        if account_id:
+            payload["account"] = {"id": account_id}
+
+        response = await self._request("POST", "/zones", json=payload)
+        result = response.get("result", {})
+        zone_id = result.get("id")
+        if zone_id:
+            self._zone_cache[domain] = zone_id
+        return result
+
+    async def ensure_cache_rule(
+        self,
+        zone_id: str,
+        *,
+        rule_name: str,
+        expression: str,
+        settings: Dict[str, Any],
+        position: str = "first",
+    ) -> Dict[str, Any]:
+        path = f"/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint"
+        try:
+            response = await self._request("GET", path)
+            ruleset = response.get("result", {})
+        except RuntimeError as exc:
+            if "404" not in str(exc):
+                raise
+            ruleset = {}
+        rules = ruleset.get("rules", [])
+
+        rule_payload = {
+            "description": rule_name,
+            "expression": expression,
+            "enabled": True,
+            "action": "set_cache_settings",
+            "action_parameters": settings,
+        }
+
+        filtered_rules = [
+            rule for rule in rules
+            if not (
+                rule.get("description") == rule_name
+                and rule.get("expression") == expression
+                and rule.get("action") == "set_cache_settings"
+            )
+        ]
+        if position == "first":
+            filtered_rules.insert(0, rule_payload)
+        else:
+            filtered_rules.append(rule_payload)
+
+        updated = await self._request(
+            "PUT",
+            path,
+            json={
+                "description": ruleset.get("description") or "Managed cache rules",
+                "kind": ruleset.get("kind") or "zone",
+                "name": ruleset.get("name") or "default",
+                "phase": ruleset.get("phase") or "http_request_cache_settings",
+                "rules": filtered_rules,
+            },
+        )
+        updated_rules = updated.get("result", {}).get("rules", [])
+        for rule in updated_rules:
+            if (
+                rule.get("description") == rule_name
+                and rule.get("expression") == expression
+                and rule.get("action") == "set_cache_settings"
+            ):
+                return rule
+        raise RuntimeError("Cloudflare cache rule 创建失败")
 
     async def create_dns_record(self, domain: str, record: DnsRecordInfo) -> str:
         zone_id = await self._get_zone_id(domain)

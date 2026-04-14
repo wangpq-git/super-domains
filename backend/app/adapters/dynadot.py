@@ -38,16 +38,14 @@ class DynadotAdapter(BasePlatformAdapter):
             if api_error:
                 logger.error(f"Dynadot authentication failed: {api_error}")
                 return False
-            # Dynadot returns various response codes; check for success
             if isinstance(data, dict):
                 return data.get("status_code", 0) == 200 or "domain" in data.get("data", {})
-            return True  # If we get any valid response, assume auth worked
+            return True
         except Exception as e:
             logger.error(f"Dynadot authentication failed: {e}")
             return False
 
     async def list_domains(self) -> List[DomainInfo]:
-        """List all domains"""
         response = await self.client.get(
             self.BASE_URL,
             params={"key": self.api_key, "command": "list_domain"}
@@ -66,7 +64,6 @@ class DynadotAdapter(BasePlatformAdapter):
         return self._parse_domain_list(data)
 
     def _parse_domain_list(self, data: Any) -> List[DomainInfo]:
-        """Parse Dynadot domain list response defensively"""
         domains = []
         if not isinstance(data, dict):
             return domains
@@ -226,18 +223,15 @@ class DynadotAdapter(BasePlatformAdapter):
         return None
 
     def _parse_date(self, date_val) -> Optional[datetime]:
-        """Parse date value defensively — handles both timestamps (ms) and date strings"""
         if not date_val:
             return None
-        # Handle Unix timestamp in milliseconds (Dynadot API v3 format)
         if isinstance(date_val, (int, float)):
             try:
-                if date_val > 1e12:  # milliseconds
+                if date_val > 1e12:
                     return datetime.fromtimestamp(date_val / 1000)
                 return datetime.fromtimestamp(date_val)
             except Exception:
                 pass
-        # Handle string timestamps
         date_str = str(date_val)
         if date_str.isdigit():
             try:
@@ -263,7 +257,6 @@ class DynadotAdapter(BasePlatformAdapter):
         return None
 
     async def list_dns_records(self, domain: str) -> List[DnsRecordInfo]:
-        """List DNS records for a domain"""
         try:
             response = await self.client.get(
                 self.BASE_URL,
@@ -277,7 +270,6 @@ class DynadotAdapter(BasePlatformAdapter):
             return []
 
     def _parse_dns_records(self, data: Any, domain: str) -> List[DnsRecordInfo]:
-        """Parse DNS records response defensively"""
         records = []
         if not isinstance(data, dict):
             return records
@@ -286,7 +278,6 @@ class DynadotAdapter(BasePlatformAdapter):
         if not dns_data:
             dns_data = data.get("dns", [])
         if not dns_data:
-            # Some responses have records directly under data
             dns_data = data.get("data", [])
 
         if not isinstance(dns_data, list):
@@ -320,16 +311,12 @@ class DynadotAdapter(BasePlatformAdapter):
         return records
 
     async def create_dns_record(self, domain: str, record: DnsRecordInfo) -> str:
-        """Create a DNS record using set_dns2"""
         return await self._set_dns(domain, record, "add")
 
     async def update_dns_record(self, domain: str, record_id: str, record: DnsRecordInfo) -> bool:
-        """Update a DNS record using set_dns2"""
         return await self._set_dns(domain, record, "edit", record_id)
 
     async def delete_dns_record(self, domain: str, record_id: str) -> bool:
-        """Delete a DNS record using set_dns2 with empty values"""
-        # Dynadot delete: set record with empty content or use delete action
         empty_record = DnsRecordInfo(
             external_id=record_id,
             record_type="",
@@ -339,7 +326,6 @@ class DynadotAdapter(BasePlatformAdapter):
         return await self._set_dns(domain, empty_record, "delete", record_id)
 
     async def _set_dns(self, domain: str, record: DnsRecordInfo, action: str = "add", record_id: Optional[str] = None) -> str:
-        """Common method for DNS operations via set_dns2"""
         try:
             payload = {
                 "key": self.api_key,
@@ -386,19 +372,22 @@ class DynadotAdapter(BasePlatformAdapter):
     async def update_nameservers(self, domain: str, nameservers: List[str]) -> bool:
         normalized = [str(ns).strip().lower() for ns in nameservers if str(ns).strip()]
         if len(normalized) < 2:
-            raise ValueError("At least 2 nameservers are required")
+            raise ValueError("Dynadot nameservers 至少需要 2 条")
 
-        response = await self.client.post(
-            self.BASE_URL,
-            json={
-                "key": self.api_key,
-                "command": "set_ns",
-                "domain": domain,
-                "name_server": normalized,
-            },
-        )
+        params: Dict[str, Any] = {
+            "key": self.api_key,
+            "command": "set_ns",
+            "domain": domain,
+        }
+        for idx, nameserver in enumerate(normalized):
+            params[f"ns{idx}"] = nameserver
+
+        response = await self.client.get(self.BASE_URL, params=params)
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"Dynadot set_ns JSON parse error: {exc}, response: {response.text[:200]}") from exc
 
         api_error = self._extract_api_error(data)
         if api_error:

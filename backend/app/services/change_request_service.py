@@ -20,6 +20,7 @@ from app.models.platform_account import PlatformAccount
 from app.models.user import User
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
 from app.services import dns_service, system_setting_service
+from app.services import cloudflare_onboarding_service
 from app.services.dns_validation import validate_dns_record_fields, validate_nameserver_list
 from app.services.notification_service import send_feishu_bot_interactive_message, send_webhook
 
@@ -272,6 +273,11 @@ def build_feishu_change_request_card(
     record_name = payload_data.get("name") or merged_snapshot.get("name") or "@"
     record_value = payload_data.get("content") or merged_snapshot.get("content") or "-"
     ttl = payload_data.get("ttl") or merged_snapshot.get("ttl") or "-"
+    if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
+        record_type = "Cloudflare"
+        record_name = payload_data.get("target_account_name") or merged_snapshot.get("target_account_name") or "-"
+        record_value = payload_data.get("cache_rule", {}).get("expression") or merged_snapshot.get("cache_rule", {}).get("expression") or "-"
+        ttl = "边缘1天 / 浏览器12小时"
     status_label = status_labels.get(change_request.status, change_request.status)
     operation_label = operation_labels.get(change_request.operation_type, change_request.operation_type)
     risk_label = risk_labels.get(change_request.risk_level, change_request.risk_level or "-")
@@ -951,6 +957,50 @@ async def create_batch_nameserver_request(db: AsyncSession, user: User, body: di
     )
 
 
+async def create_cloudflare_onboard_request(db: AsyncSession, user: User, domain_id: int) -> ChangeRequest:
+    domain = await cloudflare_onboarding_service.ensure_onboardable_domain(db, domain_id)
+    target_account, current_count = await cloudflare_onboarding_service.select_target_cloudflare_account(db)
+
+    payload = {
+        "domain_id": domain.id,
+        "domain_name": domain.domain_name,
+        "source_platform": domain.account.platform if domain.account else None,
+        "source_account_id": domain.account_id,
+        "source_account_name": domain.account.account_name if domain.account else None,
+        "target_account_id": target_account.id,
+        "target_account_name": target_account.account_name,
+        "target_account_domain_count": current_count,
+        "cache_rule": cloudflare_onboarding_service.CACHE_RULE_SNAPSHOT,
+    }
+    before_snapshot = {
+        "domain_name": domain.domain_name,
+        "source_platform": domain.account.platform if domain.account else None,
+        "source_account_id": domain.account_id,
+        "source_account_name": domain.account.account_name if domain.account else None,
+        "nameservers": domain.nameservers,
+    }
+    after_snapshot = {
+        "domain_name": domain.domain_name,
+        "target_platform": cloudflare_onboarding_service.CLOUDFLARE_PLATFORM,
+        "target_account_id": target_account.id,
+        "target_account_name": target_account.account_name,
+        "cache_rule": cloudflare_onboarding_service.CACHE_RULE_SNAPSHOT,
+    }
+    return await _create_request(
+        db,
+        user=user,
+        source="api",
+        operation_type=OP_CLOUDFLARE_ONBOARD,
+        target_type="domain",
+        target_id=domain.id,
+        domain_id=domain.id,
+        payload=payload,
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        risk_level="high",
+    )
+
+
 async def execute_batch_dns_direct(db: AsyncSession, user: User, body: dict[str, Any]) -> ChangeRequest:
     records = body.get("records") or []
     if not records:
@@ -1488,6 +1538,13 @@ async def _execute_change_request(db: AsyncSession, change_request: ChangeReques
         return await _execute_cloudflare_onboard(db, change_request.payload)
     if change_request.operation_type == OP_BATCH_NAMESERVER_UPDATE:
         return await _execute_batch_nameservers(db, change_request.payload)
+    if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
+        payload = change_request.payload
+        return await cloudflare_onboarding_service.execute_domain_onboard(
+            db,
+            domain_id=payload["domain_id"],
+            target_account_id=payload["target_account_id"],
+        )
     raise ValueError(f"Unsupported operation type: {change_request.operation_type}")
 
 

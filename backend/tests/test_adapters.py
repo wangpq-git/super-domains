@@ -253,6 +253,40 @@ async def test_spaceship_authenticate_falls_back_to_header_auth(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dynadot_update_nameservers_uses_set_ns_command(monkeypatch):
+    captured = {}
+    adapter = DynadotAdapter({"api_key": "test-key"})
+
+    class DummyResponse:
+        status_code = 200
+        text = '{"status_code": 200}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status_code": 200}
+
+    async with adapter:
+        async def fake_get(url, params):
+            captured["url"] = url
+            captured["params"] = params
+            return DummyResponse()
+
+        monkeypatch.setattr(adapter.client, "get", fake_get)
+        result = await adapter.update_nameservers(
+            "example.com",
+            ["Ns1.Cloudflare.com", " ns2.cloudflare.com "],
+        )
+
+    assert result is True
+    assert captured["params"]["command"] == "set_ns"
+    assert captured["params"]["domain"] == "example.com"
+    assert captured["params"]["ns0"] == "ns1.cloudflare.com"
+    assert captured["params"]["ns1"] == "ns2.cloudflare.com"
+
+
+@pytest.mark.asyncio
 async def test_spaceship_parse_domain_list_normalizes_payload():
     adapter = SpaceshipAdapter({"api_key": "key", "api_secret": "secret"})
 
