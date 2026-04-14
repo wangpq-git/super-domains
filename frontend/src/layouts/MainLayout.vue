@@ -47,6 +47,10 @@
           <el-icon><Tickets /></el-icon>
           <template #title>审批中心</template>
         </el-menu-item>
+        <el-menu-item index="/audit-logs">
+          <el-icon><Document /></el-icon>
+          <template #title>日志中心</template>
+        </el-menu-item>
         <el-menu-item index="/alerts">
           <el-icon><Bell /></el-icon>
           <template #title>告警规则</template>
