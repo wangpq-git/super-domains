@@ -10,6 +10,7 @@ export const useAccountsStore = defineStore('accounts', () => {
   const sortOrder = ref('desc')
   const page = ref(1)
   const pageSize = ref(20)
+  const platform = ref('')
 
   async function fetchAccounts(force = false) {
     loading.value = true
@@ -19,6 +20,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         sort_order: sortOrder.value,
         page: page.value,
         page_size: pageSize.value,
+        platform: platform.value || undefined,
       }, force)
       accounts.value = data.items ?? data.data ?? data ?? []
       total.value = data.total ?? accounts.value.length
@@ -27,5 +29,5 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
-  return { accounts, total, loading, sortBy, sortOrder, page, pageSize, fetchAccounts }
+  return { accounts, total, loading, sortBy, sortOrder, page, pageSize, platform, fetchAccounts }
 })

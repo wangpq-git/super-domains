@@ -14,7 +14,10 @@ function invalidateAccountRelatedCache() {
   invalidateCache('/alerts/expiring')
 }
 
-export function getAccounts(params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number }, force = false) {
+export function getAccounts(
+  params?: { sort_by?: string; sort_order?: string; page?: number; page_size?: number; platform?: string },
+  force = false,
+) {
   return cachedGet('/platforms', { params, force, ttl: 30_000 })
 }
 
