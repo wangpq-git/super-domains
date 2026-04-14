@@ -50,7 +50,7 @@
 import { ref, reactive } from 'vue'
 import { InfoFilled, Lock, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import type { FormInstance } from 'element-plus'
 
 const authStore = useAuthStore()

@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosRequestConfig, AxiosResponse } from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import router from '@/router'
 
 const request = axios.create({

@@ -149,7 +149,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import { useRouter } from 'vue-router'
 import PageHero from '@/components/PageHero.vue'
 import { useAuthStore } from '@/stores/auth'
