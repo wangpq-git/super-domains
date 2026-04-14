@@ -12,6 +12,7 @@ from app.schemas.platform_account import (
     PlatformAccountListResponse,
 )
 from app.services import platform_service
+from app.services import audit_log_service
 
 router = APIRouter()
 
@@ -56,6 +57,15 @@ async def create_platform(
     db: AsyncSession = Depends(get_db),
 ):
     account = await platform_service.create_account(db, data, admin.id)
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=admin.id,
+        action="platform.create",
+        target_type="platform_account",
+        target_id=account.id,
+        detail={"platform": account.platform, "account_name": account.account_name},
+    )
+    await db.commit()
     result = await platform_service.get_account(db, account.id)
     return await _build_platform_response(db, result)
 
@@ -75,17 +85,52 @@ async def update_platform(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    before = await platform_service.get_account(db, account_id)
+    before_snapshot = {
+        "account_name": before.account_name if before else None,
+        "is_active": before.is_active if before else None,
+    }
     account = await platform_service.update_account(db, account_id, data)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=admin.id,
+        action="platform.update",
+        target_type="platform_account",
+        target_id=account.id,
+        detail={
+            "platform": account.platform,
+            "account_name": account.account_name,
+            "before": before_snapshot,
+            "after": {
+                "account_name": account.account_name,
+                "is_active": account.is_active,
+            },
+        },
+    )
+    await db.commit()
     return await _build_platform_response(db, account)
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_platform(account_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    account = await platform_service.get_account(db, account_id)
     deleted = await platform_service.delete_account(db, account_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=admin.id,
+        action="platform.delete",
+        target_type="platform_account",
+        target_id=account_id,
+        detail={
+            "platform": account.platform if account else None,
+            "account_name": account.account_name if account else None,
+        },
+    )
+    await db.commit()
 
 
 @router.post("/{account_id}/test")
@@ -101,11 +146,29 @@ async def test_connection(account_id: int, admin: User = Depends(require_admin),
     try:
         async with adapter:
             result = await adapter.authenticate()
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=admin.id,
+            action="platform.test_connection",
+            target_type="platform_account",
+            target_id=account.id,
+            detail={"platform": account.platform, "account_name": account.account_name, "status": "success" if result else "failed"},
+        )
+        await db.commit()
         if result:
             return {"message": "连接测试成功", "status": "success"}
         else:
             return {"message": "认证失败，请检查凭证", "status": "failed"}
     except Exception as e:
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=admin.id,
+            action="platform.test_connection",
+            target_type="platform_account",
+            target_id=account.id,
+            detail={"platform": account.platform, "account_name": account.account_name, "status": "failed", "error": str(e)},
+        )
+        await db.commit()
         return {"message": f"连接测试失败: {str(e)}", "status": "failed"}
 
 
@@ -131,9 +194,27 @@ async def sync_account(account_id: int, current_user: User = Depends(get_current
 
     try:
         result = await do_sync(db, account_id)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=current_user.id,
+            action="platform.sync",
+            target_type="platform_account",
+            target_id=account.id,
+            detail={"platform": account.platform, "account_name": account.account_name, "status": "success", "synced": result.get("upserted", 0)},
+        )
+        await db.commit()
         return {"synced": result.get("upserted", 0), "status": "success"}
     except Exception as e:
         await db.refresh(account)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=current_user.id,
+            action="platform.sync",
+            target_type="platform_account",
+            target_id=account.id,
+            detail={"platform": account.platform, "account_name": account.account_name, "status": "failed", "error": str(e)},
+        )
+        await db.commit()
         return {"synced": 0, "status": "failed", "error": str(e)}
 
 
@@ -142,6 +223,15 @@ async def sync_all_accounts(current_user: User = Depends(get_current_user), db: 
     from app.services.sync_service import sync_all_accounts as do_sync_all
 
     results = await do_sync_all(db)
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=current_user.id,
+        action="platform.sync_all",
+        target_type="platform_account",
+        target_id=None,
+        detail={"total": len(results)},
+    )
+    await db.commit()
     success_count = sum(1 for r in results if r.get("status") == "success")
     failed_count = len(results) - success_count
     return {

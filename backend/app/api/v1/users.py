@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
+from app.services import audit_log_service
 
 router = APIRouter()
 
@@ -47,5 +48,17 @@ async def update_user(
         user.role = body["role"]
     if "is_active" in body:
         user.is_active = bool(body["is_active"])
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=admin.id,
+        action="user.update",
+        target_type="user",
+        target_id=user.id,
+        detail={
+            "username": user.username,
+            "role": user.role,
+            "is_active": user.is_active,
+        },
+    )
     await db.commit()
     return {"message": "更新成功"}

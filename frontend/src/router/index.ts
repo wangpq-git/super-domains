@@ -39,6 +39,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ChangeRequests.vue')
       },
       {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/views/AuditLogs.vue')
+      },
+      {
         path: 'alerts',
         name: 'Alerts',
         component: () => import('@/views/Alerts.vue')

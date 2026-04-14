@@ -8,7 +8,7 @@ from app.api.deps import get_current_user, get_db
 from app.models.platform_account import PlatformAccount
 from app.models.user import User
 from app.schemas.change_request import ChangeRequestResponse
-from app.services import change_request_service
+from app.services import audit_log_service, change_request_service
 
 router = APIRouter()
 
@@ -50,8 +50,19 @@ async def batch_update_dns(
     payload = body.model_dump()
     try:
         if await change_request_service.should_require_approval(db, current_user):
-            return await change_request_service.create_batch_dns_request(db, current_user, payload)
-        return await change_request_service.execute_batch_dns_direct(db, current_user, payload)
+            result = await change_request_service.create_batch_dns_request(db, current_user, payload)
+        else:
+            result = await change_request_service.execute_batch_dns_direct(db, current_user, payload)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=current_user.id,
+            action="dns.batch_update",
+            target_type="domain",
+            target_id=None,
+            detail={"domain_ids": body.domain_ids, "record_count": len(body.records), "status": result.status},
+        )
+        await db.commit()
+        return result
     except ValueError as exc:
         raise _bad_request(str(exc))
 
@@ -59,6 +70,7 @@ async def batch_update_dns(
 @router.post("/sync")
 async def batch_sync_accounts(
     body: BatchSyncRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     results = []
@@ -75,6 +87,15 @@ async def batch_sync_accounts(
         await db.commit()
         results.append({"account_id": account_id, "account_name": account.account_name, "platform": account.platform, "status": "syncing"})
 
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=current_user.id,
+        action="platform.batch_sync",
+        target_type="platform_account",
+        target_id=None,
+        detail={"account_ids": body.account_ids, "total": len(body.account_ids)},
+    )
+    await db.commit()
     return {"total": len(body.account_ids), "results": results}
 
 
@@ -87,7 +108,18 @@ async def batch_update_nameservers(
     payload = body.model_dump()
     try:
         if await change_request_service.should_require_approval(db, current_user):
-            return await change_request_service.create_batch_nameserver_request(db, current_user, payload)
-        return await change_request_service.execute_batch_nameserver_direct(db, current_user, payload)
+            result = await change_request_service.create_batch_nameserver_request(db, current_user, payload)
+        else:
+            result = await change_request_service.execute_batch_nameserver_direct(db, current_user, payload)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=current_user.id,
+            action="domain.batch_nameserver_update",
+            target_type="domain",
+            target_id=None,
+            detail={"domain_ids": body.domain_ids, "nameservers": body.nameservers, "status": result.status},
+        )
+        await db.commit()
+        return result
     except ValueError as exc:
         raise _bad_request(str(exc))
