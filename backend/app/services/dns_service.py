@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,7 @@ from app.models.dns_record import DnsRecord
 from app.adapters import get_adapter
 from app.core.encryption import decrypt_credentials
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
+from app.services import audit_log_service
 from app.services.dns_eligibility import is_dns_managed_by_account
 from app.services.dns_validation import validate_dns_record_fields
 
@@ -52,6 +54,53 @@ async def _get_dns_record_with_domain(db: AsyncSession, record_id: int) -> DnsRe
         ).where(DnsRecord.id == record_id)
     )
     return result.scalar_one_or_none()
+
+
+def _record_snapshot(record: DnsRecord | None) -> dict[str, Any]:
+    if not record:
+        return {}
+    return {
+        "record_type": record.record_type,
+        "name": record.name,
+        "content": record.content,
+        "ttl": record.ttl,
+        "priority": record.priority,
+        "proxied": record.proxied,
+        "external_id": record.external_id,
+    }
+
+
+async def _add_domain_audit_log(
+    db: AsyncSession,
+    *,
+    user_id: int | None,
+    action: str,
+    domain: Domain,
+    target_type: str,
+    target_id: int | None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+    extra_detail: dict[str, Any] | None = None,
+) -> None:
+    detail = {
+        "domain_id": domain.id,
+        "domain_name": domain.domain_name,
+    }
+    if before is not None:
+        detail["before"] = before
+    if after is not None:
+        detail["after"] = after
+    if extra_detail:
+        detail.update(extra_detail)
+
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=user_id,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        detail=detail,
+    )
 
 
 async def list_dns_records(db: AsyncSession, domain_id: int, *, sort_by: str = "record_type", sort_order: str = "asc") -> list[dict]:
@@ -135,10 +184,19 @@ async def sync_dns_records(db: AsyncSession, domain_id: int) -> dict:
     }
 
 
-async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCreate) -> DnsRecord:
+async def create_dns_record(
+    db: AsyncSession,
+    domain_id: int,
+    data: DnsRecordCreate,
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> DnsRecord:
     domain = await _get_domain_with_account(db, domain_id)
     if not domain:
         raise ValueError(f"Domain {domain_id} not found")
+    before_snapshot = _record_snapshot(record)
+
     normalized = validate_dns_record_fields(
         record_type=data.record_type,
         name=data.name,
@@ -167,10 +225,31 @@ async def create_dns_record(db: AsyncSession, domain_id: int, data: DnsRecordCre
     db.add(record)
     await db.commit()
     await db.refresh(record)
+
+    if audit_user_id is not None:
+        await _add_domain_audit_log(
+            db,
+            user_id=audit_user_id,
+            action="dns.create",
+            domain=domain,
+            target_type="dns_record",
+            target_id=record.id,
+            after=_record_snapshot(record),
+            extra_detail=audit_context,
+        )
+        await db.commit()
+
     return record
 
 
-async def update_dns_record(db: AsyncSession, record_id: int, data: DnsRecordUpdate) -> DnsRecord:
+async def update_dns_record(
+    db: AsyncSession,
+    record_id: int,
+    data: DnsRecordUpdate,
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> DnsRecord:
     record = await _get_dns_record_with_domain(db, record_id)
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
@@ -210,20 +289,57 @@ async def update_dns_record(db: AsyncSession, record_id: int, data: DnsRecordUpd
         setattr(record, key, value)
     await db.commit()
     await db.refresh(record)
+
+    if audit_user_id is not None:
+        await _add_domain_audit_log(
+            db,
+            user_id=audit_user_id,
+            action="dns.update",
+            domain=domain,
+            target_type="dns_record",
+            target_id=record.id,
+            before=before_snapshot,
+            after=_record_snapshot(record),
+            extra_detail=audit_context,
+        )
+        await db.commit()
+
     return record
 
 
-async def delete_dns_record(db: AsyncSession, record_id: int) -> bool:
+async def delete_dns_record(
+    db: AsyncSession,
+    record_id: int,
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> bool:
     record = await _get_dns_record_with_domain(db, record_id)
     if not record:
         raise ValueError(f"DNS record {record_id} not found")
 
+    domain = record.domain
+    before_snapshot = _record_snapshot(record)
+
     if record.external_id:
-        domain = record.domain
         adapter = get_adapter(domain.account.platform, decrypt_credentials(domain.account.credentials))
         async with adapter:
             await adapter.delete_dns_record(domain.domain_name, record.external_id)
 
     await db.delete(record)
     await db.commit()
+
+    if audit_user_id is not None:
+        await _add_domain_audit_log(
+            db,
+            user_id=audit_user_id,
+            action="dns.delete",
+            domain=domain,
+            target_type="dns_record",
+            target_id=record_id,
+            before=before_snapshot,
+            extra_detail=audit_context,
+        )
+        await db.commit()
+
     return True

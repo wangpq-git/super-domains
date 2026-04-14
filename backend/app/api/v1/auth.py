@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.schemas.user import UserResponse
-from app.services import auth_service
+from app.services import audit_log_service, auth_service
 from app.core.security import create_access_token, verify_password, hash_password
 
 router = APIRouter()
@@ -34,6 +34,15 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=user.id,
+        action="auth.login",
+        target_type="user",
+        target_id=user.id,
+        detail={"username": user.username},
+    )
+    await db.commit()
     token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(access_token=token, token_type="bearer")
 
@@ -69,5 +78,13 @@ async def change_password(
             detail="Old password is incorrect",
         )
     current_user.password_hash = hash_password(body.new_password)
+    await audit_log_service.add_audit_log(
+        db,
+        user_id=current_user.id,
+        action="auth.password_change",
+        target_type="user",
+        target_id=current_user.id,
+        detail={"username": current_user.username},
+    )
     await db.commit()
     return {"message": "Password updated"}

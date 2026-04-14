@@ -19,8 +19,7 @@ from app.models.domain import Domain
 from app.models.platform_account import PlatformAccount
 from app.models.user import User
 from app.schemas.dns_record import DnsRecordCreate, DnsRecordUpdate
-from app.services import dns_service, system_setting_service
-from app.services import cloudflare_onboarding_service
+from app.services import audit_log_service, cloudflare_onboarding_service, dns_service, system_setting_service
 from app.services.dns_validation import validate_dns_record_fields, validate_nameserver_list
 from app.services.notification_service import send_feishu_bot_interactive_message, send_webhook
 
@@ -181,6 +180,19 @@ async def _add_event(
         )
     )
     await db.flush()
+
+
+def _audit_actor_id(change_request: ChangeRequest) -> int | None:
+    return change_request.approver_user_id or change_request.requester_user_id
+
+
+def _audit_context(change_request: ChangeRequest) -> dict[str, Any]:
+    return {
+        "change_request_id": change_request.id,
+        "change_request_no": change_request.request_no,
+        "approval_channel": change_request.approval_channel,
+        "operation_type": change_request.operation_type,
+    }
 
 
 def build_feishu_change_request_card(
@@ -578,7 +590,13 @@ async def execute_dns_create_direct(db: AsyncSession, user: User, domain_id: int
         proxied=data.proxied,
     )
     payload_data = DnsRecordCreate(**normalized)
-    record = await dns_service.create_dns_record(db, domain_id, payload_data)
+    record = await dns_service.create_dns_record(
+        db,
+        domain_id,
+        payload_data,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_DNS_CREATE},
+    )
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
         id=0,
@@ -624,7 +642,13 @@ async def execute_dns_update_direct(db: AsyncSession, user: User, record_id: int
         priority=update_fields.get("priority", existing.priority),
         proxied=update_fields.get("proxied", existing.proxied),
     )
-    record = await dns_service.update_dns_record(db, record_id, data)
+    record = await dns_service.update_dns_record(
+        db,
+        record_id,
+        data,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_DNS_UPDATE},
+    )
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
         id=0,
@@ -663,7 +687,12 @@ async def execute_dns_delete_direct(db: AsyncSession, user: User, record_id: int
         raise ValueError(f"DNS record {record_id} not found")
     domain = await _get_domain(db, existing.domain_id)
     _ensure_domain_change_supported(domain)
-    await dns_service.delete_dns_record(db, record_id)
+    await dns_service.delete_dns_record(
+        db,
+        record_id,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_DNS_DELETE},
+    )
     now = datetime.now(UTC).replace(tzinfo=None)
     return ChangeRequest(
         id=0,
@@ -1025,7 +1054,12 @@ async def execute_batch_dns_direct(db: AsyncSession, user: User, body: dict[str,
         .where(Domain.id.in_(payload.get("domain_ids") or []))
     )
     _ensure_domains_change_supported(result.scalars().all())
-    result = await _execute_batch_dns(db, payload)
+    result = await _execute_batch_dns(
+        db,
+        payload,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_BATCH_DNS_UPDATE},
+    )
     domain_ids = payload.get("domain_ids") or []
     return _build_direct_result(
         user=user,
@@ -1046,7 +1080,12 @@ async def execute_batch_nameserver_direct(db: AsyncSession, user: User, body: di
         .where(Domain.id.in_(payload.get("domain_ids") or []))
     )
     _ensure_nameserver_changes_supported(result.scalars().all())
-    result = await _execute_batch_nameservers(db, payload)
+    result = await _execute_batch_nameservers(
+        db,
+        payload,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_BATCH_NAMESERVER_UPDATE},
+    )
     domain_ids = payload.get("domain_ids") or []
     return _build_direct_result(
         user=user,
@@ -1112,7 +1151,12 @@ async def create_cloudflare_onboard_request(db: AsyncSession, user: User, domain
 
 async def execute_cloudflare_onboard_direct(db: AsyncSession, user: User, domain_id: int) -> ChangeRequest:
     change_request = await create_cloudflare_onboard_request(db, user, domain_id)
-    execution_result = await _execute_cloudflare_onboard(db, change_request.payload)
+    execution_result = await _execute_cloudflare_onboard(
+        db,
+        change_request.payload,
+        audit_user_id=user.id,
+        audit_context={"mode": "direct", "operation_type": OP_CLOUDFLARE_ONBOARD},
+    )
     return _build_direct_result(
         user=user,
         operation_type=OP_CLOUDFLARE_ONBOARD,
@@ -1348,7 +1392,13 @@ async def cancel_change_request(db: AsyncSession, change_request: ChangeRequest,
     return change_request
 
 
-async def _execute_batch_dns(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
+async def _execute_batch_dns(
+    db: AsyncSession,
+    payload: dict[str, Any],
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     results = []
     record_infos = [
         DnsRecordInfo(
@@ -1383,13 +1433,54 @@ async def _execute_batch_dns(db: AsyncSession, payload: dict[str, Any]) -> dict[
                 for record_info in record_infos:
                     await adapter.create_dns_record(domain.domain_name, record_info)
             results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "success"})
+            if audit_user_id is not None:
+                await audit_log_service.add_audit_log(
+                    db,
+                    user_id=audit_user_id,
+                    action="dns.batch_update",
+                    target_type="domain",
+                    target_id=domain.id,
+                    detail={
+                        "domain_id": domain.id,
+                        "domain_name": domain.domain_name,
+                        "status": "success",
+                        "batch_action": payload.get("action", "add"),
+                        "records": payload.get("records", []),
+                        **(audit_context or {}),
+                    },
+                )
         except Exception as exc:
             logger.error("Batch DNS update failed for domain %s: %s", domain.domain_name, exc)
             results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "error", "message": str(exc)})
+            if audit_user_id is not None:
+                await audit_log_service.add_audit_log(
+                    db,
+                    user_id=audit_user_id,
+                    action="dns.batch_update",
+                    target_type="domain",
+                    target_id=domain.id,
+                    detail={
+                        "domain_id": domain.id,
+                        "domain_name": domain.domain_name,
+                        "status": "error",
+                        "batch_action": payload.get("action", "add"),
+                        "records": payload.get("records", []),
+                        "message": str(exc),
+                        **(audit_context or {}),
+                    },
+                )
+    if audit_user_id is not None:
+        await db.commit()
     return {"total": len(payload.get("domain_ids", [])), "results": results}
 
 
-async def _execute_cloudflare_onboard(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
+async def _execute_cloudflare_onboard(
+    db: AsyncSession,
+    payload: dict[str, Any],
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     source_domain = await _get_domain(db, payload["source_domain_id"])
     if not source_domain:
         raise ValueError(f"Domain {payload['source_domain_id']} not found")
@@ -1448,12 +1539,41 @@ async def _execute_cloudflare_onboard(db: AsyncSession, payload: dict[str, Any])
         cloudflare_domain.raw_data = zone_result.get("zone") or cloudflare_domain.raw_data
         cloudflare_domain.last_synced_at = datetime.now(UTC).replace(tzinfo=None)
 
+    previous_nameservers = list(source_domain.nameservers or [])
     source_domain.nameservers = nameservers
     source_domain.raw_data = {
         **(source_domain.raw_data or {}),
         "cloudflare_target_account_id": target_account.id,
         "cloudflare_target_account_name": target_account.account_name,
     }
+
+    if audit_user_id is not None:
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=audit_user_id,
+            action="domain.cloudflare_onboard",
+            target_type="domain",
+            target_id=source_domain.id,
+            detail={
+                "domain_id": source_domain.id,
+                "domain_name": source_domain.domain_name,
+                "before": {
+                    "platform": _domain_platform(source_domain),
+                    "account_id": source_domain.account_id,
+                    "account_name": source_domain.account.account_name if source_domain.account else None,
+                    "nameservers": previous_nameservers,
+                },
+                "after": {
+                    "platform": CLOUDFLARE_PLATFORM,
+                    "account_id": target_account.id,
+                    "account_name": target_account.account_name,
+                    "nameservers": nameservers,
+                    "zone_id": zone_result.get("zone_id"),
+                },
+                "cache_rule": payload.get("cache_rule", {}),
+                **(audit_context or {}),
+            },
+        )
 
     await db.commit()
     if cloudflare_domain.id:
@@ -1477,7 +1597,13 @@ async def _execute_cloudflare_onboard(db: AsyncSession, payload: dict[str, Any])
     }
 
 
-async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
+async def _execute_batch_nameservers(
+    db: AsyncSession,
+    payload: dict[str, Any],
+    *,
+    audit_user_id: int | None = None,
+    audit_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     nameservers = validate_nameserver_list(payload.get("nameservers", []))
     results = []
     requested_nameservers = [str(ns).strip().lower() for ns in nameservers if str(ns).strip()]
@@ -1499,6 +1625,7 @@ async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) 
             adapter = get_adapter(account.platform, decrypt_credentials(account.credentials))
             async with adapter:
                 await adapter.update_nameservers(domain.domain_name, requested_nameservers)
+            before_nameservers = list(domain.nameservers or [])
             domain.nameservers = requested_nameservers
             results.append({
                 "domain_id": domain_id,
@@ -1506,9 +1633,41 @@ async def _execute_batch_nameservers(db: AsyncSession, payload: dict[str, Any]) 
                 "status": "success",
                 "nameservers": requested_nameservers,
             })
+            if audit_user_id is not None:
+                await audit_log_service.add_audit_log(
+                    db,
+                    user_id=audit_user_id,
+                    action="domain.nameserver_update",
+                    target_type="domain",
+                    target_id=domain.id,
+                    detail={
+                        "domain_id": domain.id,
+                        "domain_name": domain.domain_name,
+                        "status": "success",
+                        "before": {"nameservers": before_nameservers},
+                        "after": {"nameservers": requested_nameservers},
+                        **(audit_context or {}),
+                    },
+                )
         except Exception as exc:
             logger.error("Batch nameserver update failed for domain %s: %s", domain.domain_name, exc)
             results.append({"domain_id": domain_id, "domain_name": domain.domain_name, "status": "error", "message": str(exc)})
+            if audit_user_id is not None:
+                await audit_log_service.add_audit_log(
+                    db,
+                    user_id=audit_user_id,
+                    action="domain.nameserver_update",
+                    target_type="domain",
+                    target_id=domain.id,
+                    detail={
+                        "domain_id": domain.id,
+                        "domain_name": domain.domain_name,
+                        "status": "error",
+                        "after": {"nameservers": requested_nameservers},
+                        "message": str(exc),
+                        **(audit_context or {}),
+                    },
+                )
     await db.commit()
     return {"total": len(payload.get("domain_ids", [])), "results": results}
 
@@ -1518,26 +1677,58 @@ async def _execute_change_request(db: AsyncSession, change_request: ChangeReques
         payload = change_request.payload
         domain = await _get_domain(db, payload["domain_id"])
         _ensure_domain_change_supported(domain)
-        record = await dns_service.create_dns_record(db, payload["domain_id"], DnsRecordCreate(**payload["data"]))
+        record = await dns_service.create_dns_record(
+            db,
+            payload["domain_id"],
+            DnsRecordCreate(**payload["data"]),
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
         return {"record_id": record.id}
     if change_request.operation_type == OP_DNS_UPDATE:
         payload = change_request.payload
         record_model = await _get_dns_record(db, payload["record_id"])
         _ensure_domain_change_supported(record_model.domain if record_model else None)
-        record = await dns_service.update_dns_record(db, payload["record_id"], DnsRecordUpdate(**payload["data"]))
+        record = await dns_service.update_dns_record(
+            db,
+            payload["record_id"],
+            DnsRecordUpdate(**payload["data"]),
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
         return {"record_id": record.id}
     if change_request.operation_type == OP_DNS_DELETE:
         payload = change_request.payload
         record_model = await _get_dns_record(db, payload["record_id"])
         _ensure_domain_change_supported(record_model.domain if record_model else None)
-        await dns_service.delete_dns_record(db, payload["record_id"])
+        await dns_service.delete_dns_record(
+            db,
+            payload["record_id"],
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
         return {"record_id": payload["record_id"]}
     if change_request.operation_type == OP_BATCH_DNS_UPDATE:
-        return await _execute_batch_dns(db, change_request.payload)
+        return await _execute_batch_dns(
+            db,
+            change_request.payload,
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
     if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
-        return await _execute_cloudflare_onboard(db, change_request.payload)
+        return await _execute_cloudflare_onboard(
+            db,
+            change_request.payload,
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
     if change_request.operation_type == OP_BATCH_NAMESERVER_UPDATE:
-        return await _execute_batch_nameservers(db, change_request.payload)
+        return await _execute_batch_nameservers(
+            db,
+            change_request.payload,
+            audit_user_id=_audit_actor_id(change_request),
+            audit_context=_audit_context(change_request),
+        )
     if change_request.operation_type == OP_CLOUDFLARE_ONBOARD:
         payload = change_request.payload
         return await cloudflare_onboarding_service.execute_domain_onboard(

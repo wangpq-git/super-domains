@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user, require_admin
 from app.models.user import User
 from app.schemas.change_request import ChangeRequestListResponse, ChangeRequestRejectBody, ChangeRequestResponse
-from app.services import change_request_service
+from app.services import audit_log_service, change_request_service
 
 router = APIRouter()
 
@@ -52,7 +52,17 @@ async def approve_change_request(
     if not change_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Change request not found")
     try:
-        return await change_request_service.approve_change_request(db, change_request, approver)
+        result = await change_request_service.approve_change_request(db, change_request, approver)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=approver.id,
+            action="change_request.approve",
+            target_type="change_request",
+            target_id=request_id,
+            detail={"request_no": result.request_no, "operation_type": result.operation_type, "domain_id": result.domain_id},
+        )
+        await db.commit()
+        return result
     except ValueError as exc:
         if change_request_service.is_change_request_processed(change_request):
             return await change_request_service.get_change_request_by_id(db, request_id) or change_request
@@ -70,7 +80,17 @@ async def reject_change_request(
     if not change_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Change request not found")
     try:
-        return await change_request_service.reject_change_request(db, change_request, approver, body.reason)
+        result = await change_request_service.reject_change_request(db, change_request, approver, body.reason)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=approver.id,
+            action="change_request.reject",
+            target_type="change_request",
+            target_id=request_id,
+            detail={"request_no": result.request_no, "operation_type": result.operation_type, "domain_id": result.domain_id, "reason": body.reason},
+        )
+        await db.commit()
+        return result
     except ValueError as exc:
         if change_request_service.is_change_request_processed(change_request):
             return await change_request_service.get_change_request_by_id(db, request_id) or change_request
@@ -87,6 +107,16 @@ async def cancel_change_request(
     if not change_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Change request not found")
     try:
-        return await change_request_service.cancel_change_request(db, change_request, current_user)
+        result = await change_request_service.cancel_change_request(db, change_request, current_user)
+        await audit_log_service.add_audit_log(
+            db,
+            user_id=current_user.id,
+            action="change_request.cancel",
+            target_type="change_request",
+            target_id=request_id,
+            detail={"request_no": result.request_no, "operation_type": result.operation_type, "domain_id": result.domain_id},
+        )
+        await db.commit()
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

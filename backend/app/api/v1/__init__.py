@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.audit_logs import router as audit_logs_router
 from app.api.v1.platforms import router as platforms_router
 from app.api.v1.domains import router as domains_router
 from app.api.v1.dns import router as dns_router
@@ -19,6 +20,7 @@ from app.api.v1.webhooks import router as webhooks_router
 api_router = APIRouter()
 
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(audit_logs_router, prefix="/audit-logs", tags=["audit-logs"])
 api_router.include_router(platforms_router, prefix="/platforms", tags=["platforms"])
 api_router.include_router(domains_router, prefix="/domains", tags=["domains"])
 api_router.include_router(dns_router, prefix="/dns", tags=["dns"])
