@@ -62,6 +62,29 @@
       </el-form>
     </el-card>
 
+    <el-card v-if="syncTask.state !== 'idle'" shadow="never" class="sync-task-card data-card">
+      <div class="sync-task-header">
+        <div>
+          <h3 class="section-title">批量同步进度</h3>
+          <p class="section-subtitle">{{ syncTaskMessage }}</p>
+        </div>
+        <el-tag :type="syncTaskTagType" effect="plain">{{ syncTaskLabel }}</el-tag>
+      </div>
+
+      <el-progress
+        :percentage="syncTaskProgress"
+        :status="syncTask.state === 'failed' ? 'exception' : syncTask.state === 'succeeded' ? 'success' : undefined"
+      />
+
+      <div class="sync-task-metrics">
+        <span>总账户 {{ syncTask.total || 0 }}</span>
+        <span>已完成 {{ syncTask.completed || 0 }}</span>
+        <span>成功 {{ syncTask.success || 0 }}</span>
+        <span>失败 {{ syncTask.failed || 0 }}</span>
+        <span v-if="syncTask.current_account">当前 {{ syncTask.current_account }}</span>
+      </div>
+    </el-card>
+
     <el-card shadow="never" class="accounts-card">
       <template #header>
         <div class="table-toolbar">
@@ -172,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Plus, Edit, Delete, Refresh, Connection, ArrowDown, Search } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { ElMessage } from '@/utils/message'
@@ -180,7 +203,7 @@ import type { FormInstance } from 'element-plus'
 import PageHero from '@/components/PageHero.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useAuthStore } from '@/stores/auth'
-import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts } from '@/api/accounts'
+import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts, getSyncAllAccountsStatus } from '@/api/accounts'
 import { platformLabel, formatDateTime, platformTagType } from '@/utils/format'
 
 const store = useAccountsStore()
@@ -191,6 +214,8 @@ const isEdit = ref(false)
 const editId = ref<number | null>(null)
 const submitting = ref(false)
 const syncingAll = ref(false)
+const syncTask = ref<any>({ state: 'idle' })
+let syncStatusTimer: number | null = null
 
 const platforms = [
   { value: 'cloudflare', label: 'Cloudflare' },
@@ -264,6 +289,38 @@ const platformStats = computed(() => {
     needsAttention,
     domains,
   }
+})
+
+const syncTaskProgress = computed(() => {
+  const total = Number(syncTask.value?.total || 0)
+  const completed = Number(syncTask.value?.completed || 0)
+  if (!total) return syncTask.value?.state === 'succeeded' ? 100 : 0
+  return Math.min(100, Math.round((completed / total) * 100))
+})
+
+const syncTaskLabel = computed(() => {
+  const state = syncTask.value?.state
+  if (state === 'queued') return '排队中'
+  if (state === 'running') return '执行中'
+  if (state === 'succeeded') return '已完成'
+  if (state === 'failed') return '已失败'
+  return '空闲'
+})
+
+const syncTaskTagType = computed(() => {
+  const state = syncTask.value?.state
+  if (state === 'queued') return 'warning'
+  if (state === 'running') return 'primary'
+  if (state === 'succeeded') return 'success'
+  if (state === 'failed') return 'danger'
+  return 'info'
+})
+
+const syncTaskMessage = computed(() => {
+  if (syncTask.value?.message) return syncTask.value.message
+  if (syncTask.value?.state === 'running') return '系统正在按顺序同步全部启用账户。'
+  if (syncTask.value?.state === 'queued') return '同步任务已提交，等待后台执行。'
+  return '当前没有批量同步任务。'
 })
 
 const rules = {
@@ -398,14 +455,48 @@ async function handleSyncAll() {
   syncingAll.value = true
   try {
     const { data } = await syncAllAccounts()
-    const success = data.results?.filter((r: any) => r.status === 'success' || !r.error).length ?? data.success ?? 0
-    const failed = data.results?.filter((r: any) => r.status === 'failed' || !!r.error).length ?? data.failed ?? 0
-    ElMessage.success(`同步完成: ${success} 成功, ${failed} 失败`)
-    store.fetchAccounts()
+    if (!data.accepted) {
+      syncTask.value = data.task || { state: 'running', message: data.detail }
+      ElMessage.warning(data.detail || '已有同步任务执行中')
+      startSyncStatusPolling()
+      return
+    }
+    syncTask.value = data.task
+    ElMessage.success(data.detail || '同步任务已提交')
+    startSyncStatusPolling()
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || '同步失败')
   } finally {
     syncingAll.value = false
+  }
+}
+
+function stopSyncStatusPolling() {
+  if (syncStatusTimer !== null) {
+    window.clearInterval(syncStatusTimer)
+    syncStatusTimer = null
+  }
+}
+
+function startSyncStatusPolling() {
+  stopSyncStatusPolling()
+  syncStatusTimer = window.setInterval(() => {
+    fetchSyncStatus()
+  }, 2500)
+}
+
+async function fetchSyncStatus() {
+  try {
+    const { data } = await getSyncAllAccountsStatus()
+    syncTask.value = data
+    if (data.state === 'succeeded' || data.state === 'failed' || data.state === 'idle') {
+      stopSyncStatusPolling()
+      if (data.state === 'succeeded' || data.state === 'failed') {
+        store.fetchAccounts(true)
+      }
+    }
+  } catch {
+    stopSyncStatusPolling()
   }
 }
 
@@ -431,6 +522,15 @@ async function handleDelete(row: any) {
 
 onMounted(() => {
   store.fetchAccounts()
+  fetchSyncStatus().then(() => {
+    if (syncTask.value?.state === 'queued' || syncTask.value?.state === 'running') {
+      startSyncStatusPolling()
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  stopSyncStatusPolling()
 })
 </script>
 
@@ -457,6 +557,27 @@ onMounted(() => {
 
 .filter-card :deep(.el-card__body) {
   padding: 16px 20px;
+}
+
+.sync-task-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sync-task-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sync-task-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #667085;
+  font-size: 13px;
 }
 
 .accounts-table {

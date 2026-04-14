@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
+from uuid import uuid4
 
 from app.api.deps import get_db, get_current_user, require_admin
 from app.models.user import User
@@ -13,6 +14,8 @@ from app.schemas.platform_account import (
 )
 from app.services import platform_service
 from app.services import audit_log_service
+from app.services import sync_job_service
+from app.tasks.sync_tasks import sync_all_accounts_manual
 
 router = APIRouter()
 
@@ -226,23 +229,71 @@ async def sync_account(account_id: int, current_user: User = Depends(get_current
 
 @router.post("/sync-all")
 async def sync_all_accounts(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    from app.services.sync_service import sync_all_accounts as do_sync_all
+    current_status = await sync_job_service.get_sync_all_status()
+    current_lock_owner = await sync_job_service.get_sync_all_lock_owner()
+    if current_status and current_status.get("state") in {"queued", "running"} and current_lock_owner:
+        return {
+            "accepted": False,
+            "detail": "已有同步任务执行中，请稍后查看进度",
+            "task": current_status,
+        }
 
-    results = await do_sync_all(db)
+    task_id = str(uuid4())
+    locked = await sync_job_service.acquire_sync_all_lock(task_id)
+    if not locked:
+        current_status = await sync_job_service.get_sync_all_status()
+        return {
+            "accepted": False,
+            "detail": "已有同步任务执行中，请稍后查看进度",
+            "task": current_status,
+        }
+    sync_all_accounts_manual.apply_async(args=[current_user.id], task_id=task_id)
+
+    status_payload = {
+        "task_id": task_id,
+        "state": "queued",
+        "source": "manual",
+        "triggered_by": current_user.id,
+        "queued_at": sync_job_service.now_iso(),
+        "updated_at": sync_job_service.now_iso(),
+        "total": 0,
+        "completed": 0,
+        "success": 0,
+        "failed": 0,
+        "message": "同步任务已提交，正在排队执行",
+    }
+    await sync_job_service.set_sync_all_status(status_payload)
+
     await audit_log_service.add_audit_log(
         db,
         user_id=current_user.id,
         action="platform.sync_all",
         target_type="platform_account",
         target_id=None,
-        detail={"total": len(results)},
+        detail={"task_id": task_id, "status": "queued"},
     )
     await db.commit()
-    success_count = sum(1 for r in results if r.get("status") == "success")
-    failed_count = len(results) - success_count
     return {
-        "total": len(results),
-        "success": success_count,
-        "failed": failed_count,
-        "results": results,
+        "accepted": True,
+        "detail": "同步任务已提交",
+        "task": status_payload,
     }
+
+
+@router.get("/sync-all/status")
+async def get_sync_all_accounts_status(current_user: User = Depends(get_current_user)):
+    status_payload = await sync_job_service.get_sync_all_status()
+    if not status_payload:
+        return {
+            "state": "idle",
+            "message": "当前没有同步任务",
+        }
+    if status_payload.get("state") in {"queued", "running"}:
+        current_lock_owner = await sync_job_service.get_sync_all_lock_owner()
+        if not current_lock_owner:
+            return {
+                **status_payload,
+                "state": "failed",
+                "message": "同步任务已中断，可重新发起",
+            }
+    return status_payload
