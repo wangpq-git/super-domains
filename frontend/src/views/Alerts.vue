@@ -89,14 +89,16 @@
             <el-switch v-model="row.is_enabled" @change="handleToggle(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" :icon="Edit" @click="openDialog(row)">编辑</el-button>
-            <el-popconfirm title="确定删除该规则吗？" @confirm="handleDelete(row)">
-              <template #reference>
-                <el-button size="small" type="danger" :icon="Delete">删除</el-button>
-              </template>
-            </el-popconfirm>
+            <div class="table-actions">
+              <el-button text size="small" class="action-link" :icon="Edit" @click="openDialog(row)">编辑</el-button>
+              <el-popconfirm title="确定删除该规则吗？" @confirm="handleDelete(row)">
+                <template #reference>
+                  <el-button text size="small" class="action-link action-link--danger" :icon="Delete">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -464,6 +466,31 @@ onMounted(() => {
 <style scoped>
 .alerts-container {
   width: 100%;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.action-link {
+  padding: 4px 6px;
+  color: #667085;
+}
+
+.action-link:hover,
+.action-link:focus-visible {
+  color: #409eff;
+  background: #eff6ff;
+  border-radius: 8px;
+}
+
+.action-link--danger:hover,
+.action-link--danger:focus-visible {
+  color: #f04438;
+  background: #fff1f3;
 }
 
 .hero-metrics {
