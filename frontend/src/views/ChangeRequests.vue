@@ -3,7 +3,7 @@
     <PageHero
       eyebrow="APPROVAL HUB"
       title="审批中心"
-      :subtitle="authStore.isAdmin ? '统一查看、审批和追踪全部变更单。' : '查看、撤销并跟踪我提交的变更申请。'"
+      :subtitle="authStore.isAdmin ? '统一查看、审批和追踪全部变更单，适合集中处理待审批和失败任务。' : '查看、撤销并跟踪我提交的变更申请。'"
       tone="green"
     >
       <template #meta>
@@ -19,14 +19,11 @@
       </template>
     </PageHero>
 
-    <el-card shadow="never" class="data-card">
+    <el-card shadow="never" class="filter-card data-card">
       <template #header>
-        <div class="card-header">
-          <div>
-            <div class="page-title">变更单列表</div>
-            <div class="page-subtitle">按状态、操作类型和关键词快速定位目标申请单，详情弹窗中可查看完整载荷。</div>
-          </div>
-          <el-tag type="info" effect="plain">当前 {{ requests.length }} 条</el-tag>
+        <div>
+          <h3 class="section-title">筛选条件</h3>
+          <p class="section-subtitle">按状态、操作类型和关键词快速定位目标申请单，适合批量审批前先做预检。</p>
         </div>
       </template>
 
@@ -66,6 +63,18 @@
           <el-button @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="data-card">
+      <template #header>
+        <div class="table-toolbar">
+          <div>
+            <h3 class="section-title">变更单列表</h3>
+            <p class="section-subtitle">详情弹窗中可查看完整载荷、执行结果和审批处理状态。</p>
+          </div>
+          <el-tag type="info" effect="plain">当前 {{ requests.length }} 条</el-tag>
+        </div>
+      </template>
 
       <el-table v-loading="loading" :data="requests" stripe style="width: 100%">
         <el-table-column prop="request_no" label="申请单号" width="140" />
@@ -475,6 +484,14 @@ onMounted(() => {
   width: 100%;
 }
 
+.filter-card {
+  border-radius: 18px !important;
+}
+
+.filter-card :deep(.el-card__body) {
+  padding: 16px 20px;
+}
+
 .hero-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -483,27 +500,10 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.page-subtitle {
-  margin-top: 4px;
-  color: #7a869a;
-  font-size: 13px;
-}
-
 .filter-bar {
-  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 0;
 }
 
 .summary-block {

@@ -20,12 +20,12 @@
       </template>
     </PageHero>
 
-    <el-card shadow="never" class="data-card">
+    <el-card shadow="never" class="filter-card data-card">
       <template #header>
         <div class="card-header">
           <div>
-            <div class="page-title">审计日志</div>
-            <div class="page-subtitle">操作日志和域名修改记录共用一套检索入口，管理员可查看全部，普通用户仅查看自己的记录。</div>
+            <h3 class="section-title">筛选条件</h3>
+            <p class="section-subtitle">操作日志和域名修改记录共用一套检索入口，管理员可查看全部，普通用户仅查看自己的记录。</p>
           </div>
           <el-segmented v-model="scope" :options="scopeOptions" />
         </div>
@@ -60,6 +60,18 @@
           <el-button @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="data-card">
+      <template #header>
+        <div class="table-toolbar">
+          <div>
+            <h3 class="section-title">日志列表</h3>
+            <p class="section-subtitle">优先展示关联对象、操作摘要和关键上下文，适合快速定位问题来源。</p>
+          </div>
+          <el-tag type="info" effect="plain">当前 {{ logs.length }} 条</el-tag>
+        </div>
+      </template>
 
       <el-table v-loading="loading" :data="logs" stripe style="width: 100%">
         <el-table-column label="时间" width="176">
@@ -395,6 +407,14 @@ function prettyJson(value: Record<string, any> | null | undefined) {
   gap: 20px;
 }
 
+.filter-card {
+  border-radius: 18px !important;
+}
+
+.filter-card :deep(.el-card__body) {
+  padding: 16px 20px;
+}
+
 .hero-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -411,23 +431,10 @@ function prettyJson(value: Record<string, any> | null | undefined) {
   flex-wrap: wrap;
 }
 
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #102a43;
-}
-
-.page-subtitle {
-  margin-top: 6px;
-  color: #6b7c93;
-  font-size: 13px;
-}
-
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 0;
-  margin-bottom: 18px;
 }
 
 .summary-block {
