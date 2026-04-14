@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,13 +114,28 @@ async def sync_account(db: AsyncSession, account_id: int) -> dict:
     }
 
 
-async def sync_all_accounts(db: AsyncSession) -> list[dict]:
+ProgressReporter = Callable[[dict], Awaitable[None]]
+
+
+async def sync_all_accounts(db: AsyncSession, progress_reporter: ProgressReporter | None = None) -> list[dict]:
     result = await db.execute(
         select(PlatformAccount).where(PlatformAccount.is_active == True)
     )
     accounts = result.scalars().all()
 
     results = []
+    total = len(accounts)
+    completed = 0
+
+    if progress_reporter:
+        await progress_reporter({
+            "total": total,
+            "completed": completed,
+            "success": 0,
+            "failed": 0,
+            "current_account": accounts[0].account_name if accounts else None,
+        })
+
     for account in accounts:
         try:
             sync_result = await sync_account(db, account.id)
@@ -132,6 +148,19 @@ async def sync_all_accounts(db: AsyncSession) -> list[dict]:
                 "account_name": account.account_name,
                 "status": "failed",
                 "error": str(e),
+            })
+        completed += 1
+        if progress_reporter:
+            success_count = sum(1 for item in results if item.get("status") == "success")
+            failed_count = len(results) - success_count
+            next_account = accounts[completed].account_name if completed < total else None
+            await progress_reporter({
+                "total": total,
+                "completed": completed,
+                "success": success_count,
+                "failed": failed_count,
+                "current_account": next_account,
+                "last_result": results[-1],
             })
 
     return results

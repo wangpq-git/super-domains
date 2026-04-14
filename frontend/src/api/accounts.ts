@@ -57,3 +57,7 @@ export function syncAllAccounts() {
   invalidateAccountRelatedCache()
   return request.post('/platforms/sync-all', null, { timeout: 300000 })
 }
+
+export function getSyncAllAccountsStatus() {
+  return request.get('/platforms/sync-all/status')
+}
