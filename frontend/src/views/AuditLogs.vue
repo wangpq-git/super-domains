@@ -153,7 +153,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import PageHero from '@/components/PageHero.vue'
 import { getAuditLogs, type AuditLogItem } from '@/api/auditLogs'
 import { formatDateTime } from '@/utils/format'

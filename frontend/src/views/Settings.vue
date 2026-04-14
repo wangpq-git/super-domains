@@ -64,7 +64,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import PageHero from '@/components/PageHero.vue'
 import { getUsers, updateUser } from '@/api/users'
 import { formatDateTime } from '@/utils/format'

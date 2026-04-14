@@ -194,7 +194,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, Download, Delete, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import PageHero from '@/components/PageHero.vue'
 import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'

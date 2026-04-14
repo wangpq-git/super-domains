@@ -234,7 +234,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { Plus, Edit, Delete, Bell } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/message'
 import PageHero from '@/components/PageHero.vue'
 import type { FormInstance } from 'element-plus'
 import {
