@@ -100,8 +100,18 @@
         <el-table-column label="摘要" min-width="280">
           <template #default="{ row }">
             <div class="summary-block">
-              <div class="summary-line">目标: {{ summarizeTarget(row) }}</div>
-              <div class="summary-line monospace">{{ compactPayload(row.payload) }}</div>
+              <div class="summary-head">
+                <span class="summary-label">目标</span>
+                <span class="summary-value">{{ summarizeTarget(row) }}</span>
+              </div>
+              <div v-if="summaryTitle(row)" class="summary-primary">{{ summaryTitle(row) }}</div>
+              <div v-if="summaryMeta(row).length" class="summary-meta">
+                <span v-for="item in summaryMeta(row)" :key="item.label" class="summary-chip">
+                  <span class="summary-chip-label">{{ item.label }}</span>
+                  <span class="summary-chip-value">{{ item.value }}</span>
+                </span>
+              </div>
+              <div v-if="summaryExtra(row)" class="summary-extra">{{ summaryExtra(row) }}</div>
             </div>
           </template>
         </el-table-column>
@@ -270,9 +280,99 @@ function prettyJson(value: Record<string, any> | null | undefined) {
   }
 }
 
-function compactPayload(value: Record<string, any>) {
-  const raw = JSON.stringify(value || {})
-  return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw
+function stringifyValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  if (Array.isArray(value)) return value.join(', ')
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  return String(value)
+}
+
+function pickSummaryItems(row: ChangeRequest) {
+  const payload = row.payload || {}
+  const data = payload.data || {}
+  const recordName = data.name ?? payload.record_name ?? payload.record_id
+  const content = data.content ?? payload.content
+  const ttl = data.ttl ?? payload.ttl
+  const proxied = data.proxied ?? payload.proxied
+  const priority = data.priority ?? payload.priority
+  const domainName = payload.domain_name
+
+  if (row.operation_type === 'batch_nameserver_update') {
+    const nameservers = Array.isArray(payload.nameservers) ? payload.nameservers.slice(0, 2).join(', ') : null
+    return [
+      { label: '域名数', value: stringifyValue((payload.domain_ids || []).length || payload.domain_count) },
+      { label: 'NS', value: stringifyValue(nameservers) },
+    ]
+  }
+
+  if (row.operation_type === 'batch_dns_update') {
+    const firstRecord = Array.isArray(payload.records) ? payload.records[0] : null
+    return [
+      { label: '域名数', value: stringifyValue((payload.domain_ids || []).length || payload.domain_count) },
+      { label: '记录数', value: stringifyValue((payload.records || []).length) },
+      { label: '示例', value: stringifyValue(firstRecord ? `${firstRecord.record_type} ${firstRecord.name}` : null) },
+    ]
+  }
+
+  return [
+    { label: '域名', value: stringifyValue(domainName) },
+    { label: '主机', value: stringifyValue(recordName) },
+    { label: '值', value: stringifyValue(content) },
+    { label: 'TTL', value: stringifyValue(ttl) },
+    { label: '代理', value: stringifyValue(proxied) },
+    { label: '优先级', value: stringifyValue(priority) },
+  ]
+    .filter((item) => item.value)
+    .slice(0, 4)
+}
+
+function summaryTitle(row: ChangeRequest) {
+  const payload = row.payload || {}
+  const data = payload.data || {}
+
+  if (row.operation_type === 'dns_create') {
+    const parts = [data.record_type, data.name].filter(Boolean)
+    return parts.length ? `新增 ${parts.join(' / ')}` : '新增 DNS 记录'
+  }
+
+  if (row.operation_type === 'dns_update') {
+    const parts = [row.payload?.record_id ? `#${row.payload.record_id}` : null, payload.domain_name].filter(Boolean)
+    return parts.length ? `修改 ${parts.join(' · ')}` : '修改 DNS 记录'
+  }
+
+  if (row.operation_type === 'dns_delete') {
+    const parts = [row.payload?.record_id ? `#${row.payload.record_id}` : null, payload.domain_name].filter(Boolean)
+    return parts.length ? `删除 ${parts.join(' · ')}` : '删除 DNS 记录'
+  }
+
+  if (row.operation_type === 'batch_dns_update') {
+    return '批量更新 DNS'
+  }
+
+  if (row.operation_type === 'batch_nameserver_update') {
+    return '批量修改 NS'
+  }
+
+  return operationLabel(row.operation_type)
+}
+
+function summaryMeta(row: ChangeRequest) {
+  return pickSummaryItems(row) as Array<{ label: string; value: string }>
+}
+
+function summaryExtra(row: ChangeRequest) {
+  const payload = row.payload || {}
+
+  if (row.operation_type === 'batch_nameserver_update' && Array.isArray(payload.nameservers)) {
+    const remaining = payload.nameservers.slice(2)
+    return remaining.length ? `其余 NS：${remaining.join(', ')}` : null
+  }
+
+  if (row.operation_type === 'batch_dns_update' && Array.isArray(payload.records) && payload.records.length > 1) {
+    return `其余 ${payload.records.length - 1} 条记录可在详情中查看`
+  }
+
+  return null
 }
 
 function operationLabel(operationType: string) {
@@ -509,11 +609,77 @@ onMounted(() => {
 .summary-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
-.summary-line {
-  color: #3d4a5c;
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.summary-label {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f5f7fa;
+  color: #667085;
+}
+
+.summary-value {
+  color: #344054;
+  font-weight: 600;
+}
+
+.summary-primary {
+  color: #101828;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.summary-chip-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+.summary-chip-value {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summary-extra {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.summary-chip-value,
+.summary-primary,
+.summary-extra {
+  word-break: break-word;
 }
 
 .monospace {
