@@ -39,6 +39,8 @@ async def list_platforms(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     platform: str = Query("", description="平台筛选"),
+    sync_status: str = Query("", description="同步状态筛选"),
+    keyword: str = Query("", description="账户关键词搜索"),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await platform_service.list_accounts(
@@ -48,6 +50,8 @@ async def list_platforms(
         page=page,
         page_size=page_size,
         platform=platform or None,
+        sync_status=sync_status or None,
+        keyword=keyword or None,
     )
     return rows
 

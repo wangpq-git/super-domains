@@ -1,57 +1,75 @@
 <template>
-  <div class="accounts-container">
-    <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="hero-eyebrow">ACCOUNT CENTER</p>
-        <div class="hero-title-row">
-          <h1>平台账户管理</h1>
-          <el-tag type="info" effect="plain" round>共 {{ store.total || store.accounts.length }} 个账户</el-tag>
-        </div>
-        <p class="hero-subtitle">集中维护各平台凭证、同步状态与域名规模，异常账户可以更快定位和处理。</p>
+  <div class="accounts-container page-stack">
+    <PageHero
+      eyebrow="ACCOUNT CENTER"
+      title="平台账户管理"
+      subtitle="集中维护各平台凭证、同步状态与域名规模，优先处理异常账户，批量同步前可先完成筛选和连接校验。"
+      tone="blue"
+    >
+      <template #meta>
+        <el-tag effect="plain" round>共 {{ store.total || store.accounts.length }} 个账户</el-tag>
+      </template>
+      <div class="hero-highlights">
+        <span>已接入平台 {{ platformStats.connected }}</span>
+        <span>同步成功 {{ platformStats.success }}</span>
+        <span>待关注 {{ platformStats.needsAttention }}</span>
+        <span>域名总量 {{ platformStats.domains }}</span>
       </div>
-      <div class="hero-actions">
+      <template #actions>
         <el-button :icon="Refresh" circle @click="handleRefresh" />
         <el-button type="success" plain :icon="Refresh" :loading="syncingAll" @click="handleSyncAll">一键同步所有</el-button>
         <el-button v-if="authStore.isAdmin" type="primary" :icon="Plus" @click="openDialog()">添加账户</el-button>
-      </div>
-    </section>
+      </template>
+    </PageHero>
 
-    <section class="stats-grid">
-      <article class="stat-card stat-card--primary">
-        <span class="stat-label">已接入平台</span>
-        <strong class="stat-value">{{ platformStats.connected }}</strong>
-        <span class="stat-hint">当前列表中不同平台数量</span>
-      </article>
-      <article class="stat-card">
-        <span class="stat-label">域名总量</span>
-        <strong class="stat-value">{{ platformStats.domains }}</strong>
-        <span class="stat-hint">已同步账户域名累计</span>
-      </article>
-      <article class="stat-card">
-        <span class="stat-label">同步成功</span>
-        <strong class="stat-value">{{ platformStats.success }}</strong>
-        <span class="stat-hint">最近一次同步状态正常</span>
-      </article>
-      <article class="stat-card stat-card--warn">
-        <span class="stat-label">待关注</span>
-        <strong class="stat-value">{{ platformStats.needsAttention }}</strong>
-        <span class="stat-hint">失败、同步中或未同步账户</span>
-      </article>
-    </section>
+    <el-card shadow="never" class="filter-card data-card">
+      <template #header>
+        <div>
+          <h3 class="section-title">筛选条件</h3>
+          <p class="section-subtitle">按平台、同步状态和账户关键词缩小结果范围，适合批量同步前快速定位异常账户。</p>
+        </div>
+      </template>
+
+      <el-form :inline="true" @submit.prevent>
+        <el-form-item label="平台">
+          <el-select v-model="store.platform" clearable placeholder="全部平台" style="width: 170px" @change="handleFilter">
+            <el-option v-for="p in platforms" :key="p.value" :label="p.label" :value="p.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="同步状态">
+          <el-select v-model="store.syncStatus" clearable placeholder="全部状态" style="width: 160px" @change="handleFilter">
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="failed" />
+            <el-option label="同步中" value="syncing" />
+            <el-option label="未同步" value="never" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="搜索">
+          <el-input
+            v-model="store.keyword"
+            clearable
+            placeholder="账户名称搜索"
+            style="width: 220px"
+            @clear="handleFilter"
+            @keyup.enter="handleFilter"
+          >
+            <template #append><el-button :icon="Search" @click="handleFilter" /></template>
+          </el-input>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleResetFilters">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
 
     <el-card shadow="never" class="accounts-card">
       <template #header>
-        <div class="card-header">
+        <div class="table-toolbar">
           <div>
-            <span>账户列表</span>
-            <p class="card-subtitle">优先查看异常状态和最近未同步的账户，批量同步前可先测试连接。</p>
+            <h3 class="section-title">账户列表</h3>
+            <p class="section-subtitle">保留测试、同步和编辑入口，筛选结果会同步影响分页与总量统计。</p>
           </div>
-          <div class="card-filters">
-            <span class="filter-label">平台筛选</span>
-            <el-select v-model="store.platform" clearable placeholder="全部平台" style="width: 180px" @change="handlePlatformChange">
-              <el-option v-for="p in platforms" :key="p.value" :label="p.label" :value="p.value" />
-            </el-select>
-          </div>
+          <el-tag type="info" effect="plain">当前 {{ store.accounts.length }} 条</el-tag>
         </div>
       </template>
 
@@ -155,10 +173,11 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Refresh, Connection, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Refresh, Connection, ArrowDown, Search } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { ElMessage } from '@/utils/message'
 import type { FormInstance } from 'element-plus'
+import PageHero from '@/components/PageHero.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useAuthStore } from '@/stores/auth'
 import { createAccount, updateAccount, deleteAccount, testAccount, syncAccount, syncAllAccounts } from '@/api/accounts'
@@ -268,8 +287,16 @@ function handleRefresh() {
   store.fetchAccounts(true)
 }
 
-function handlePlatformChange() {
+function handleFilter() {
   store.page = 1
+  store.fetchAccounts(true)
+}
+
+function handleResetFilters() {
+  store.page = 1
+  store.platform = ''
+  store.syncStatus = ''
+  store.keyword = ''
   store.fetchAccounts(true)
 }
 
@@ -410,109 +437,26 @@ onMounted(() => {
 <style scoped>
 .accounts-container {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
 }
 
-.hero-panel {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 24px 28px;
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.28), transparent 32%),
-    linear-gradient(135deg, #17324d 0%, #244d6e 42%, #2d6b73 100%);
-  color: #fff;
-  box-shadow: 0 18px 48px rgba(23, 50, 77, 0.18);
-}
-
-.hero-copy {
-  max-width: 760px;
-}
-
-.hero-eyebrow {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.hero-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.hero-title-row h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.15;
-}
-
-.hero-subtitle {
-  margin: 12px 0 0;
-  max-width: 620px;
-  font-size: 14px;
-  line-height: 1.7;
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.hero-actions {
+.hero-highlights {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 18px 20px;
-  border: 1px solid rgba(18, 39, 61, 0.06);
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-}
-
-.stat-card--primary {
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.1) 0%, rgba(108, 131, 242, 0.04) 100%);
-}
-
-.stat-card--warn {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(255, 255, 255, 0.96) 100%);
-}
-
-.stat-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #667085;
-  letter-spacing: 0.04em;
-}
-
-.stat-value {
-  font-size: 30px;
-  line-height: 1;
-  color: #162234;
-}
-
-.stat-hint {
   font-size: 13px;
-  color: #7b8794;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.84);
 }
 
 .accounts-card {
   overflow: hidden;
+}
+
+.filter-card {
+  border-radius: 18px !important;
+}
+
+.filter-card :deep(.el-card__body) {
+  padding: 16px 20px;
 }
 
 .accounts-table {
@@ -521,38 +465,6 @@ onMounted(() => {
 
 .table-shell {
   overflow-x: auto;
-}
-
-.card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.card-header span {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.card-subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: #8a94a6;
-}
-
-.card-filters {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.filter-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #5f6c80;
 }
 
 .pagination-wrapper {
@@ -618,41 +530,7 @@ onMounted(() => {
   background: rgba(100, 116, 139, 0.12);
 }
 
-@media (max-width: 1080px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 768px) {
-  .hero-panel {
-    padding: 20px;
-    border-radius: 16px;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .hero-title-row h1 {
-    font-size: 24px;
-  }
-
-  .hero-actions {
-    justify-content: stretch;
-  }
-
-  .hero-actions :deep(.el-button) {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .card-header {
-    align-items: stretch;
-  }
-
   .pagination-wrapper {
     justify-content: center;
   }

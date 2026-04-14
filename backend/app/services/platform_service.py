@@ -1,4 +1,4 @@
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_account import PlatformAccount
@@ -15,8 +15,11 @@ async def list_accounts(
     page: int = 1,
     page_size: int = 20,
     platform: str | None = None,
+    sync_status: str | None = None,
+    keyword: str | None = None,
 ) -> dict:
     ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
+    normalized_keyword = (keyword or "").strip()
     cache_key = data_cache_service.build_cache_key(
         "platform_accounts",
         sort_by=sort_by,
@@ -24,6 +27,8 @@ async def list_accounts(
         page=page,
         page_size=page_size,
         platform=platform or "",
+        sync_status=sync_status or "",
+        keyword=normalized_keyword,
     )
 
     async def _load() -> dict:
@@ -37,6 +42,12 @@ async def list_accounts(
         filters = []
         if platform:
             filters.append(PlatformAccount.platform == platform)
+        if sync_status == "never":
+            filters.append(or_(PlatformAccount.sync_status.is_(None), PlatformAccount.sync_status == ""))
+        elif sync_status:
+            filters.append(PlatformAccount.sync_status == sync_status)
+        if normalized_keyword:
+            filters.append(PlatformAccount.account_name.ilike(f"%{normalized_keyword}%"))
 
         total_query = select(func.count()).select_from(PlatformAccount)
         if filters:
