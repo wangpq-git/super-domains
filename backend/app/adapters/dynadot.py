@@ -382,3 +382,34 @@ class DynadotAdapter(BasePlatformAdapter):
         except Exception as e:
             logger.error(f"Failed to {action} DNS record: {e}")
             raise
+
+    async def update_nameservers(self, domain: str, nameservers: List[str]) -> bool:
+        normalized = [ns.strip().lower() for ns in nameservers if str(ns).strip()]
+        if len(normalized) < 2:
+            raise ValueError("Dynadot nameservers 至少需要 2 条")
+
+        params: Dict[str, Any] = {
+            "key": self.api_key,
+            "command": "set_ns",
+            "domain": domain,
+        }
+        for idx, nameserver in enumerate(normalized):
+            params[f"ns{idx}"] = nameserver
+
+        response = await self.client.get(self.BASE_URL, params=params)
+        response.raise_for_status()
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"Dynadot set_ns JSON parse error: {exc}, response: {response.text[:200]}") from exc
+
+        api_error = self._extract_api_error(data)
+        if api_error:
+            raise RuntimeError(f"Dynadot API error: {api_error}")
+
+        if isinstance(data, dict):
+            status_code = data.get("status_code")
+            if status_code in (None, 200):
+                return True
+
+        return True

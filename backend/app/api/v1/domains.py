@@ -2,10 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
+from app.models.user import User
+from app.schemas.change_request import ChangeRequestResponse
+from app.services import change_request_service
 from app.services import domain_service
 
 router = APIRouter()
+
+
+def _value_error_status(detail: str) -> int:
+    normalized = detail.lower()
+    if "not found" in normalized:
+        return status.HTTP_404_NOT_FOUND
+    return status.HTTP_400_BAD_REQUEST
 
 
 @router.get("")
@@ -52,3 +62,15 @@ async def get_domain_detail(domain_id: int, db: AsyncSession = Depends(get_db)):
     if not detail:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
     return detail
+
+
+@router.post("/{domain_id}/onboard-cloudflare", response_model=ChangeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
+async def onboard_domain_to_cloudflare(
+    domain_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await change_request_service.create_cloudflare_onboard_request(db, current_user, domain_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=_value_error_status(str(exc)), detail=str(exc))
