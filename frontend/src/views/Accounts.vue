@@ -35,6 +35,18 @@
           <el-select v-model="store.platform" clearable placeholder="全部平台" style="width: 170px" @change="handleFilter">
             <el-option v-for="p in platforms" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
+          <div class="quick-platforms">
+            <el-button
+              v-for="item in quickPlatforms"
+              :key="item.value"
+              size="small"
+              round
+              :type="store.platform === item.value ? 'primary' : 'default'"
+              @click="applyQuickPlatformFilter(item.value)"
+            >
+              {{ item.label }}
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="同步状态">
           <el-select v-model="store.syncStatus" clearable placeholder="全部状态" style="width: 160px" @change="handleFilter">
@@ -230,6 +242,10 @@ const platforms = [
   { value: 'porkbun', label: 'Porkbun' },
   { value: 'spaceship', label: 'Spaceship' },
 ]
+const quickPlatforms = [
+  { value: 'cloudflare', label: 'Cloudflare' },
+  { value: 'dynadot', label: 'Dynadot' },
+]
 
 const platformCredentialFields: Record<string, Array<{key: string, label: string, placeholder: string, required: boolean, type?: string}>> = {
   cloudflare: [
@@ -401,6 +417,11 @@ function handleFilter() {
   store.fetchAccounts(true)
 }
 
+function applyQuickPlatformFilter(platform: string) {
+  store.platform = store.platform === platform ? '' : platform
+  handleFilter()
+}
+
 function handleResetFilters() {
   store.page = 1
   store.platform = ''
@@ -549,14 +570,10 @@ async function fetchSyncStatus() {
         const terminalKey = `${data.task_id || 'none'}:${data.state}:${data.completed || 0}:${data.failed || 0}`
         if (lastSyncTaskTerminalKey.value !== terminalKey) {
           lastSyncTaskTerminalKey.value = terminalKey
-          if (data.state === 'succeeded') {
-            if (Number(data.total || 0) > 0) {
-              ElMessage.success(`批量同步完成：${data.success || 0} 成功，${data.failed || 0} 失败`)
-            } else {
-              ElMessage.warning('没有可同步的启用账户')
-            }
-          } else {
+          if (data.state === 'failed') {
             ElMessage.error(data.message || '批量同步失败')
+          } else if (Number(data.total || 0) <= 0) {
+            ElMessage.warning('没有可同步的启用账户')
           }
         }
       }
@@ -623,6 +640,14 @@ onBeforeUnmount(() => {
 
 .filter-card :deep(.el-card__body) {
   padding: 16px 20px;
+}
+
+.quick-platforms {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 10px;
 }
 
 .sync-task-card :deep(.el-card__body) {

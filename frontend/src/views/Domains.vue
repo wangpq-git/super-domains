@@ -33,6 +33,18 @@
           <el-select v-model="store.filters.platform" placeholder="全部平台" clearable style="width: 160px" @change="handleFilter">
             <el-option v-for="p in platforms" :key="p" :label="platformLabel(p)" :value="p" />
           </el-select>
+          <div class="quick-platforms">
+            <el-button
+              v-for="item in quickPlatforms"
+              :key="item.value"
+              size="small"
+              round
+              :type="store.filters.platform === item.value ? 'primary' : 'default'"
+              @click="applyQuickPlatformFilter(item.value)"
+            >
+              {{ item.label }}
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="store.filters.status" placeholder="全部状态" clearable style="width: 140px" @change="handleFilter">
@@ -223,6 +235,10 @@ const showNsDialog = ref(false)
 const nsForm = reactive<string[]>(['', ''])
 
 const platforms = ['cloudflare', 'namecom', 'dynadot', 'godaddy', 'namecheap', 'namesilo', 'openprovider', 'porkbun', 'spaceship']
+const quickPlatforms = [
+  { value: 'cloudflare', label: 'Cloudflare' },
+  { value: 'dynadot', label: 'Dynadot' },
+]
 const hasUnsupportedSelection = computed(() => selectedDomains.value.some((domain) => domain.platform !== 'cloudflare'))
 const activeCount = computed(() => store.domains.filter((domain: any) => domain.status === 'active').length)
 const expiringCount = computed(() => {
@@ -239,6 +255,11 @@ function handleSelectionChange(rows: DomainRow[]) {
 
 function clearSelection() {
   tableRef.value?.clearSelection()
+}
+
+function applyQuickPlatformFilter(platform: string) {
+  store.filters.platform = store.filters.platform === platform ? '' : platform
+  handleFilter()
 }
 
 function addNs() {
@@ -461,6 +482,14 @@ onMounted(() => {
 
 .filter-card :deep(.el-form-item) {
   margin-bottom: 8px;
+}
+
+.quick-platforms {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 10px;
 }
 
 .batch-bar {
