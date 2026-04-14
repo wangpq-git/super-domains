@@ -73,16 +73,24 @@
             <el-tag :type="actionTagType(row.action)" effect="plain">{{ actionLabel(row.action) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="域名" min-width="180">
-          <template #default="{ row }">{{ row.domain_name || extractDomainName(row.detail) || '-' }}</template>
+        <el-table-column label="关联对象" min-width="220">
+          <template #default="{ row }">
+            <div class="subject-block">
+              <div class="subject-title">{{ primarySubject(row) }}</div>
+              <div v-if="secondarySubject(row)" class="subject-meta">{{ secondarySubject(row) }}</div>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="目标" width="140">
           <template #default="{ row }">{{ targetLabel(row.target_type) }}</template>
         </el-table-column>
-        <el-table-column label="摘要" min-width="320">
+        <el-table-column label="摘要" min-width="360">
           <template #default="{ row }">
             <div class="summary-block">
-              <div class="summary-line">{{ summarizeDetail(row) }}</div>
+              <div class="summary-line summary-line--primary">{{ summarizeDetail(row) }}</div>
+              <div v-if="subjectMeta(row)" class="summary-line summary-line--muted">
+                {{ subjectMeta(row) }}
+              </div>
               <div v-if="row.detail?.change_request_no" class="summary-line summary-line--muted">
                 变更单 {{ row.detail.change_request_no }}
               </div>
@@ -116,7 +124,7 @@
           <el-descriptions-item label="操作人">{{ currentLog.actor_name || currentLog.user_id || '系统' }}</el-descriptions-item>
           <el-descriptions-item label="动作">{{ actionLabel(currentLog.action) }}</el-descriptions-item>
           <el-descriptions-item label="目标">{{ targetLabel(currentLog.target_type) }}</el-descriptions-item>
-          <el-descriptions-item label="域名">{{ currentLog.domain_name || extractDomainName(currentLog.detail) || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="关联对象">{{ primarySubject(currentLog) }}</el-descriptions-item>
           <el-descriptions-item label="目标 ID">{{ currentLog.target_id ?? '-' }}</el-descriptions-item>
         </el-descriptions>
 
@@ -176,6 +184,7 @@ const actionOptions = [
   { label: '登录', value: 'auth.login' },
   { label: '修改密码', value: 'auth.password_change' },
   { label: '用户更新', value: 'user.update' },
+  { label: '系统配置更新', value: 'system_settings.update' },
   { label: '账户创建', value: 'platform.create' },
   { label: '账户更新', value: 'platform.update' },
   { label: '账户删除', value: 'platform.delete' },
@@ -191,6 +200,41 @@ const actionOptions = [
   { label: '审批拒绝', value: 'change_request.reject' },
   { label: '审批取消', value: 'change_request.cancel' },
 ]
+
+const settingKeyLabels: Record<string, string> = {
+  APPROVAL_ENABLED: '审批开关',
+  APPROVAL_ALLOW_ADMIN_BYPASS: '管理员免审批',
+  LDAP_ENABLED: 'LDAP 登录',
+  LDAP_HOST: 'LDAP 地址',
+  LDAP_PORT: 'LDAP 端口',
+  LDAP_USE_SSL: 'LDAP SSL',
+  LDAP_BASE_DN: 'LDAP Base DN',
+  LDAP_BIND_DN: 'LDAP 绑定账号',
+  LDAP_BIND_PASSWORD: 'LDAP 绑定密码',
+  LDAP_USER_FILTER: 'LDAP 用户过滤器',
+  FEISHU_APPROVAL_WEBHOOK_URL: '飞书审批 Webhook',
+  FEISHU_BOT_APP_ID: '飞书 Bot App ID',
+  FEISHU_BOT_APP_SECRET: '飞书 Bot Secret',
+  FEISHU_APPROVAL_CHAT_ID: '飞书审批群 Chat ID',
+  FEISHU_APPROVAL_BASE_URL: '飞书审批基础地址',
+  FEISHU_APPROVAL_CALLBACK_TOKEN: '飞书回调 Token',
+  FEISHU_APPROVAL_ENCRYPT_KEY: '飞书加密 Key',
+  FEISHU_APPROVAL_SIGNATURE_TOLERANCE_SECONDS: '飞书签名容差',
+  FEISHU_APPROVAL_ADMIN_MAP: '飞书管理员映射',
+  K8S_INGRESS_KUBECONFIG: 'K8S Kubeconfig',
+  K8S_INGRESS_NAMESPACE_OPTIONS: 'K8S 命名空间选项',
+  K8S_INGRESS_REQUEST_TIMEOUT_SECONDS: 'K8S 请求超时',
+  TENCENT_COS_SECRET_ID: 'COS SecretId',
+  TENCENT_COS_SECRET_KEY: 'COS SecretKey',
+  TENCENT_COS_REQUEST_TIMEOUT_SECONDS: 'COS 请求超时',
+  SMTP_HOST: 'SMTP 地址',
+  SMTP_PORT: 'SMTP 端口',
+  SMTP_USER: 'SMTP 用户名',
+  SMTP_PASSWORD: 'SMTP 密码',
+  SMTP_FROM: '发件人',
+  SMTP_USE_TLS: 'SMTP TLS',
+  SMTP_START_TLS: 'SMTP STARTTLS',
+}
 
 const domainCount = computed(() => logs.value.filter((item) => item.action.startsWith('dns.') || item.action.startsWith('domain.')).length)
 const operationCount = computed(() => logs.value.length - domainCount.value)
@@ -269,6 +313,7 @@ function actionTagType(action: string): '' | 'success' | 'warning' | 'danger' | 
   if (action.startsWith('dns.') || action.startsWith('domain.')) return 'success'
   if (action.startsWith('change_request.')) return 'warning'
   if (action.startsWith('auth.')) return 'info'
+  if (action.startsWith('system_settings.')) return 'info'
   return ''
 }
 
@@ -279,12 +324,20 @@ function targetLabel(targetType: string | null) {
     platform_account: '账户',
     user: '用户',
     change_request: '变更单',
+    system_setting: '系统配置',
   }
   return targetType ? map[targetType] || targetType : '-'
 }
 
 function summarizeDetail(row: AuditLogItem) {
   const detail = row.detail || {}
+  if (row.action === 'system_settings.update') {
+    const labels = formatSettingKeys(detail.keys)
+    if (labels.length) {
+      return `更新 ${labels.length} 项配置：${labels.slice(0, 3).join('、')}${labels.length > 3 ? ' 等' : ''}`
+    }
+    return '更新系统配置'
+  }
   if (detail.status === 'error' && detail.message) return `执行失败：${detail.message}`
   if (detail.status === 'success' && detail.after?.nameservers) return `NS 已更新为 ${detail.after.nameservers.join(', ')}`
   if (detail.after?.content) return `${detail.after.record_type || ''} ${detail.after.name || '@'} -> ${detail.after.content}`.trim()
@@ -293,6 +346,39 @@ function summarizeDetail(row: AuditLogItem) {
   if (detail.account_name) return `${detail.platform || '-'} / ${detail.account_name}`
   if (detail.record_count) return `涉及 ${detail.record_count} 条记录`
   return '查看详情获取完整上下文'
+}
+
+function primarySubject(row: AuditLogItem) {
+  const domain = row.domain_name || extractDomainName(row.detail)
+  if (domain) return domain
+  if (row.target_type === 'system_setting') return '系统配置'
+  if (row.detail?.change_request_no) return `变更单 ${row.detail.change_request_no}`
+  if (row.detail?.account_name) return row.detail.account_name
+  return targetLabel(row.target_type)
+}
+
+function secondarySubject(row: AuditLogItem) {
+  if (row.action === 'system_settings.update') {
+    const labels = formatSettingKeys(row.detail?.keys)
+    return labels.length ? labels.join('、') : '配置项变更'
+  }
+  if (row.target_id) return `目标 ID：${row.target_id}`
+  if (row.detail?.platform) return `平台：${row.detail.platform}`
+  return ''
+}
+
+function subjectMeta(row: AuditLogItem) {
+  if (row.action === 'system_settings.update') {
+    const labels = formatSettingKeys(row.detail?.keys)
+    return labels.length ? `配置项：${labels.join('、')}` : '配置项已更新'
+  }
+  if (row.ip_address) return `来源 IP：${row.ip_address}`
+  return ''
+}
+
+function formatSettingKeys(keys?: unknown) {
+  if (!Array.isArray(keys)) return []
+  return keys.map((item) => settingKeyLabels[String(item)] || String(item))
 }
 
 function prettyJson(value: Record<string, any> | null | undefined) {
@@ -350,9 +436,27 @@ function prettyJson(value: Record<string, any> | null | undefined) {
   gap: 4px;
 }
 
+.subject-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subject-title,
 .summary-line {
   color: #243b53;
   line-height: 1.55;
+}
+
+.subject-title,
+.summary-line--primary {
+  font-weight: 600;
+}
+
+.subject-meta {
+  color: #829ab1;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .summary-line--muted {
