@@ -83,6 +83,7 @@
         <span>失败 {{ syncTask.failed || 0 }}</span>
         <span v-if="syncTask.current_account">当前 {{ syncTask.current_account }}</span>
       </div>
+      <p class="sync-task-note">进度统计基于本次批量任务的全部启用账户，不受下方筛选和分页影响。</p>
     </el-card>
 
     <el-card shadow="never" class="accounts-card">
@@ -319,10 +320,60 @@ const syncTaskTagType = computed(() => {
 
 const syncTaskMessage = computed(() => {
   if (syncTask.value?.message) return syncTask.value.message
-  if (syncTask.value?.state === 'running') return '系统正在按顺序同步全部启用账户。'
+  if (syncTask.value?.state === 'running') return '系统正在并发同步全部启用账户。'
   if (syncTask.value?.state === 'queued') return '同步任务已提交，等待后台执行。'
   return '当前没有批量同步任务。'
 })
+
+function reconcileAccountsWithSyncTask(task: any) {
+  if (!Array.isArray(store.accounts) || store.accounts.length === 0) return
+
+  const resultMap = new Map<number, any>()
+  const results = Array.isArray(task?.results) ? task.results : []
+  for (const item of results) {
+    if (typeof item?.account_id === 'number') {
+      resultMap.set(item.account_id, item)
+    }
+  }
+
+  const runningNames = new Set(
+    String(task?.current_account || '')
+      .split('、')
+      .map((name) => name.trim())
+      .filter(Boolean),
+  )
+
+  store.accounts = store.accounts.map((row) => {
+    const nextRow = { ...row }
+    const result = resultMap.get(row.id)
+
+    if (result) {
+      nextRow.sync_status = result.status === 'success' ? 'success' : 'failed'
+      if (result.status === 'success') {
+        nextRow.last_sync_at = task?.finished_at || task?.updated_at || nextRow.last_sync_at
+      }
+      if (result.error) {
+        nextRow.sync_error = result.error
+      }
+      return nextRow
+    }
+
+    if (task?.state === 'running' && runningNames.has(row.account_name)) {
+      nextRow.sync_status = 'syncing'
+      return nextRow
+    }
+
+    if (task?.state === 'succeeded' && nextRow.sync_status === 'syncing') {
+      nextRow.sync_status = 'success'
+    }
+
+    if (task?.state === 'failed' && nextRow.sync_status === 'syncing') {
+      nextRow.sync_status = 'failed'
+    }
+
+    return nextRow
+  })
+}
 
 const rules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
@@ -490,9 +541,11 @@ async function fetchSyncStatus() {
   try {
     const { data } = await getSyncAllAccountsStatus()
     syncTask.value = data
+    reconcileAccountsWithSyncTask(data)
     if (data.state === 'succeeded' || data.state === 'failed' || data.state === 'idle') {
       stopSyncStatusPolling()
       if (data.state === 'succeeded' || data.state === 'failed') {
+        await store.fetchAccounts(true)
         const terminalKey = `${data.task_id || 'none'}:${data.state}:${data.completed || 0}:${data.failed || 0}`
         if (lastSyncTaskTerminalKey.value !== terminalKey) {
           lastSyncTaskTerminalKey.value = terminalKey
@@ -506,7 +559,6 @@ async function fetchSyncStatus() {
             ElMessage.error(data.message || '批量同步失败')
           }
         }
-        store.fetchAccounts(true)
       }
     }
   } catch {
@@ -592,6 +644,12 @@ onBeforeUnmount(() => {
   gap: 16px;
   color: #667085;
   font-size: 13px;
+}
+
+.sync-task-note {
+  margin: 0;
+  font-size: 12px;
+  color: #98a2b3;
 }
 
 .accounts-table {

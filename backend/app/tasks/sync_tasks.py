@@ -76,6 +76,7 @@ async def _run_sync_all(task_id: str, triggered_by: int | None = None, source: s
                 }
                 for row in result.all()
             ]
+            account_order = {account["id"]: index for index, account in enumerate(accounts)}
             total = len(accounts)
             progress_lock = asyncio.Lock()
             semaphore = asyncio.Semaphore(SYNC_ALL_CONCURRENCY)
@@ -110,7 +111,11 @@ async def _run_sync_all(task_id: str, triggered_by: int | None = None, source: s
                             "completed": completed,
                             "success": success_count,
                             "failed": failed_count,
-                            "current_account": "、".join(sorted(running_accounts)) or None,
+                            "current_account": "、".join(
+                                account["account_name"]
+                                for account in accounts
+                                if account["account_name"] in running_accounts
+                            ) or None,
                             "message": f"正在同步 {account_snapshot['account_name']}",
                         })
 
@@ -129,15 +134,19 @@ async def _run_sync_all(task_id: str, triggered_by: int | None = None, source: s
                             "completed": completed,
                             "success": success_count,
                             "failed": failed_count,
-                            "current_account": "、".join(sorted(running_accounts)) or None,
+                            "current_account": "、".join(
+                                account["account_name"]
+                                for account in accounts
+                                if account["account_name"] in running_accounts
+                            ) or None,
                             "last_result": sync_result,
-                            "message": "账户同步进行中" if completed < total else "账户同步即将完成",
+                            "message": "账户同步进行中（并发执行）" if completed < total else "账户同步即将完成",
                         })
                     return sync_result
 
             try:
                 await report_progress({
-                    "message": f"开始并发同步账户（并发 {SYNC_ALL_CONCURRENCY}）",
+                    "message": f"开始同步全部账户（并发 {SYNC_ALL_CONCURRENCY}）",
                     "total": total,
                     "completed": 0,
                     "success": 0,
@@ -146,6 +155,7 @@ async def _run_sync_all(task_id: str, triggered_by: int | None = None, source: s
                 })
                 if total:
                     await asyncio.gather(*(sync_one(account_snapshot) for account_snapshot in accounts))
+                results.sort(key=lambda item: account_order.get(item.get("account_id", -1), total))
                 final_status = {
                     "task_id": task_id,
                     "state": "succeeded",
@@ -158,6 +168,7 @@ async def _run_sync_all(task_id: str, triggered_by: int | None = None, source: s
                     "completed": completed,
                     "success": success_count,
                     "failed": failed_count,
+                    "current_account": None,
                     "results": results,
                     "message": "账户同步完成",
                 }

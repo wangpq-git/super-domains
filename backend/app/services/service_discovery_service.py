@@ -2,10 +2,36 @@ import asyncio
 import json
 from typing import Any
 
+import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import data_cache_service
+from app.core.config import settings
 from app.services import system_setting_service
+
+_SERVICE_DISCOVERY_CACHE_TTL_SECONDS = 300
+
+
+async def _get_cached_ingresses(namespace: str) -> dict[str, Any] | None:
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        raw = await redis.get(f"service_discovery:ingresses:{namespace}")
+        if not raw:
+            return None
+        return json.loads(raw)
+    finally:
+        await redis.aclose()
+
+
+async def _set_cached_ingresses(namespace: str, payload: dict[str, Any]) -> None:
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        await redis.set(
+            f"service_discovery:ingresses:{namespace}",
+            json.dumps(payload),
+            ex=_SERVICE_DISCOVERY_CACHE_TTL_SECONDS,
+        )
+    finally:
+        await redis.aclose()
 
 
 def _parse_namespace_options(raw: Any) -> list[dict[str, str]]:
@@ -100,22 +126,16 @@ def _list_ingresses_sync(kubeconfig: str, namespace: str, timeout_seconds: int) 
 
 
 async def get_service_discovery_config(db: AsyncSession) -> dict[str, Any]:
-    ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
-    cache_key = data_cache_service.build_cache_key("service_discovery_config")
-
-    async def _load() -> dict[str, Any]:
-        namespace_raw = await system_setting_service.resolve_setting(db, "K8S_INGRESS_NAMESPACE_OPTIONS")
-        kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
-        options = _parse_namespace_options(namespace_raw.value)
-        return {
-            "configured": bool(kubeconfig.strip()),
-            "namespace_options": options,
-        }
-
-    return await data_cache_service.get_or_set(cache_key, _load, ttl_seconds=ttl_seconds)
+    namespace_raw = await system_setting_service.resolve_setting(db, "K8S_INGRESS_NAMESPACE_OPTIONS")
+    kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
+    options = _parse_namespace_options(namespace_raw.value)
+    return {
+        "configured": bool(kubeconfig.strip()),
+        "namespace_options": options,
+    }
 
 
-async def list_ingresses(db: AsyncSession, namespace: str | None = None) -> dict[str, Any]:
+async def list_ingresses(db: AsyncSession, namespace: str | None = None, force_refresh: bool = False) -> dict[str, Any]:
     config = await get_service_discovery_config(db)
     namespace_options = config["namespace_options"]
     allowed_namespaces = {item["namespace"] for item in namespace_options}
@@ -130,20 +150,17 @@ async def list_ingresses(db: AsyncSession, namespace: str | None = None) -> dict
     if allowed_namespaces and resolved_namespace not in allowed_namespaces:
         raise ValueError("当前命名空间未在配置中心开放")
 
+    if not force_refresh:
+        cached = await _get_cached_ingresses(resolved_namespace)
+        if cached:
+            return cached
+
     kubeconfig = await system_setting_service.get_string(db, "K8S_INGRESS_KUBECONFIG")
     timeout_seconds = await system_setting_service.get_int(db, "K8S_INGRESS_REQUEST_TIMEOUT_SECONDS")
-    cache_ttl_seconds = await system_setting_service.get_int(db, "DATA_CACHE_TTL_SECONDS")
-    cache_key = data_cache_service.build_cache_key(
-        "service_discovery_ingresses",
-        target_namespace=resolved_namespace,
-        timeout_seconds=timeout_seconds,
-    )
-
-    async def _load() -> dict[str, Any]:
-        items = await asyncio.to_thread(_list_ingresses_sync, kubeconfig, resolved_namespace, max(timeout_seconds, 1))
-        return {
-            "namespace": resolved_namespace,
-            "items": items,
-        }
-
-    return await data_cache_service.get_or_set(cache_key, _load, ttl_seconds=cache_ttl_seconds)
+    items = await asyncio.to_thread(_list_ingresses_sync, kubeconfig, resolved_namespace, max(timeout_seconds, 1))
+    payload = {
+        "namespace": resolved_namespace,
+        "items": items,
+    }
+    await _set_cached_ingresses(resolved_namespace, payload)
+    return payload
