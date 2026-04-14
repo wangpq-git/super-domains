@@ -38,6 +38,7 @@ async def list_platforms(
     sort_order: str = Query("desc", description="排序方向 asc/desc"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    platform: str = Query("", description="平台筛选"),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await platform_service.list_accounts(
@@ -46,6 +47,7 @@ async def list_platforms(
         sort_order=sort_order,
         page=page,
         page_size=page_size,
+        platform=platform or None,
     )
     return rows
 

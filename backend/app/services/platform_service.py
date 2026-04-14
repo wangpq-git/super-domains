@@ -13,6 +13,7 @@ async def list_accounts(
     sort_order: str = "desc",
     page: int = 1,
     page_size: int = 20,
+    platform: str | None = None,
 ) -> dict:
     ALLOWED_SORT_FIELDS = {"platform", "account_name", "last_sync_at", "sync_status", "created_at"}
     if sort_by in ALLOWED_SORT_FIELDS:
@@ -21,10 +22,17 @@ async def list_accounts(
     else:
         order_col = PlatformAccount.created_at.desc()
 
-    total_result = await db.execute(select(func.count()).select_from(PlatformAccount))
+    filters = []
+    if platform:
+        filters.append(PlatformAccount.platform == platform)
+
+    total_query = select(func.count()).select_from(PlatformAccount)
+    if filters:
+        total_query = total_query.where(*filters)
+    total_result = await db.execute(total_query)
     total = total_result.scalar_one()
 
-    result = await db.execute(
+    query = (
         select(
             PlatformAccount.id,
             PlatformAccount.platform,
@@ -42,6 +50,10 @@ async def list_accounts(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
+    if filters:
+        query = query.where(*filters)
+
+    result = await db.execute(query)
     return {
         "items": [row._asdict() for row in result.all()],
         "total": total,

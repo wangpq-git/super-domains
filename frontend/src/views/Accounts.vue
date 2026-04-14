@@ -46,7 +46,12 @@
             <span>账户列表</span>
             <p class="card-subtitle">优先查看异常状态和最近未同步的账户，批量同步前可先测试连接。</p>
           </div>
-          <el-tag type="info" effect="plain">{{ store.accounts.length }} 条当前记录</el-tag>
+          <div class="card-filters">
+            <span class="filter-label">平台筛选</span>
+            <el-select v-model="store.platform" clearable placeholder="全部平台" style="width: 180px" @change="handlePlatformChange">
+              <el-option v-for="p in platforms" :key="p.value" :label="p.label" :value="p.value" />
+            </el-select>
+          </div>
         </div>
       </template>
 
@@ -260,6 +265,11 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 }
 
 function handleRefresh() {
+  store.fetchAccounts(true)
+}
+
+function handlePlatformChange() {
+  store.page = 1
   store.fetchAccounts(true)
 }
 
@@ -530,6 +540,19 @@ onMounted(() => {
   margin: 6px 0 0;
   font-size: 13px;
   color: #8a94a6;
+}
+
+.card-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #5f6c80;
 }
 
 .pagination-wrapper {
