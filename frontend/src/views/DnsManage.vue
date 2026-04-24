@@ -3,7 +3,7 @@
     <PageHero
       eyebrow="DNS WORKBENCH"
       title="DNS 管理"
-      subtitle="面向 Cloudflare 域名的记录维护台，适合快速同步、检查与变更单执行后的复核。"
+      subtitle="集中查看各平台 DNS 记录；仅 Cloudflare 域名支持记录增删改。"
       tone="slate"
     >
       <template #meta>
@@ -12,7 +12,7 @@
       <div class="hero-metrics">
         <span>记录 {{ records.length }}</span>
         <span>已同步 {{ syncedCount }}</span>
-        <span>可编辑 {{ authStore.isAdmin ? '是' : '否' }}</span>
+        <span>可编辑 {{ canMutateRecords ? '是' : '否' }}</span>
       </div>
     </PageHero>
 
@@ -20,7 +20,7 @@
       <template #header>
         <div>
           <h3 class="section-title">选择域名</h3>
-          <p class="section-subtitle">先检索并选中域名，再进行同步或记录编辑；当前仅支持 Cloudflare 域名。</p>
+          <p class="section-subtitle">先检索并选中域名，可查看和同步记录；仅 Cloudflare 域名支持记录增删改。</p>
         </div>
       </template>
       <el-form :inline="true">
@@ -48,12 +48,14 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-tag type="warning" effect="light">当前仅支持修改 Cloudflare 域名</el-tag>
+          <el-tag :type="canMutateRecords ? 'success' : 'warning'" effect="light">
+            {{ canMutateRecords ? 'Cloudflare 域名，可修改记录' : '非 Cloudflare 域名，仅支持查看和同步' }}
+          </el-tag>
         </el-form-item>
         <el-form-item>
           <el-button :icon="Refresh" circle :disabled="!selectedDomainId" @click="fetchRecords(true)" />
           <el-button type="primary" :icon="Refresh" :loading="syncing" :disabled="!selectedDomainId" @click="handleSync">同步记录</el-button>
-          <el-button v-if="authStore.isAdmin" type="success" :icon="Plus" :disabled="!selectedDomainId" @click="openDialog()">添加记录</el-button>
+          <el-button v-if="authStore.isAdmin" type="success" :icon="Plus" :disabled="!canMutateRecords" @click="openDialog()">添加记录</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -95,8 +97,8 @@
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="authStore.isAdmin" size="small" type="primary" :icon="Edit" @click="openDialog(row)">编辑</el-button>
-              <el-popconfirm v-if="authStore.isAdmin" title="确定删除该DNS记录吗？" @confirm="handleDelete(row)">
+              <el-button v-if="authStore.isAdmin" size="small" type="primary" :icon="Edit" :disabled="!canMutateRecords" @click="openDialog(row)">编辑</el-button>
+              <el-popconfirm v-if="authStore.isAdmin && canMutateRecords" title="确定删除该DNS记录吗？" @confirm="handleDelete(row)">
                 <template #reference>
                   <el-button size="small" type="danger" :icon="Delete">删除</el-button>
                 </template>
@@ -183,10 +185,9 @@ const defaultForm = { record_type: 'A', name: '', content: '', ttl: 3600, priori
 const form = ref({ ...defaultForm })
 
 const showPriority = computed(() => ['MX', 'SRV'].includes(form.value.record_type))
-const selectedDomainLabel = computed(() => {
-  const matched = domainList.value.find((item) => item.id === selectedDomainId.value)
-  return matched?.domain_name || '尚未选择域名'
-})
+const selectedDomain = computed(() => domainList.value.find((item) => item.id === selectedDomainId.value))
+const selectedDomainLabel = computed(() => selectedDomain.value?.domain_name || '尚未选择域名')
+const canMutateRecords = computed(() => authStore.isAdmin && selectedDomain.value?.platform === 'cloudflare')
 const syncedCount = computed(() => records.value.filter((record) => record.sync_status === 'synced').length)
 
 function isValidIpv4(value: string) {
@@ -270,8 +271,6 @@ async function fetchDomains(search?: string, force = false) {
       page: 1,
       page_size: 50,
       exclude_expired: true,
-      dns_manageable_only: true,
-      platform: 'cloudflare',
     }
     if (search) params.search = search
     const { data } = await getDomains(params, force)
@@ -345,6 +344,10 @@ async function handleSync() {
 }
 
 function openDialog(row?: DnsRecord) {
+  if (!canMutateRecords.value) {
+    ElMessage.warning('非 Cloudflare 域名仅支持查看和同步')
+    return
+  }
   isEdit.value = !!row
   editId.value = row?.id ?? null
   if (row) {
@@ -363,6 +366,10 @@ function openDialog(row?: DnsRecord) {
 }
 
 async function handleSubmit() {
+  if (!canMutateRecords.value) {
+    ElMessage.warning('非 Cloudflare 域名仅支持查看和同步')
+    return
+  }
   await formRef.value?.validate()
   submitting.value = true
   try {
@@ -401,6 +408,10 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: DnsRecord) {
+  if (!canMutateRecords.value) {
+    ElMessage.warning('非 Cloudflare 域名仅支持查看和同步')
+    return
+  }
   try {
     const { data } = await deleteDnsRecord(row.id)
     if (data.status === 'pending_approval') {

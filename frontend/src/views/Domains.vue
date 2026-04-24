@@ -212,7 +212,7 @@ import type { ElTable } from 'element-plus'
 import { useDomainsStore } from '@/stores/domains'
 import { useAuthStore } from '@/stores/auth'
 import { batchUpdateNameservers, batchUpdateDns, batchSyncAccounts, exportDomainsCsv, exportDomainsXlsx } from '@/api/batch'
-import { getDomains, onboardDomainToCloudflare } from '@/api/domains'
+import { onboardDomainToCloudflare } from '@/api/domains'
 import { platformLabel, platformTagType, formatDate } from '@/utils/format'
 
 interface DomainRow {
@@ -446,23 +446,8 @@ function handleReset() {
   store.fetchDomains()
 }
 
-async function gotoDns(row: DomainRow) {
-  let cloudflareDomain = row.platform === 'cloudflare'
-    ? row
-    : store.domains.find((domain: DomainRow) => domain.domain_name === row.domain_name && domain.platform === 'cloudflare')
-
-  if (!cloudflareDomain) {
-    const { data } = await getDomains({ platform: 'cloudflare', search: row.domain_name, page: 1, page_size: 1 })
-    const matches = data.items ?? data.data ?? []
-    cloudflareDomain = matches.find((domain: DomainRow) => domain.domain_name === row.domain_name)
-  }
-
-  if (!cloudflareDomain) {
-    ElMessage.warning('当前仅支持修改已接入 Cloudflare 的域名')
-    return
-  }
-
-  router.push({ path: '/dns', query: { domain: cloudflareDomain.domain_name, domain_id: String(cloudflareDomain.id), auto_sync: '1' } })
+function gotoDns(row: DomainRow) {
+  router.push({ path: '/dns', query: { domain: row.domain_name, domain_id: String(row.id), auto_sync: '1' } })
 }
 
 onMounted(() => {
