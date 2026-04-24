@@ -23,6 +23,7 @@ export function getAccounts(
     platform?: string
     sync_status?: string
     keyword?: string
+    search?: string
   },
   force = false,
 ) {

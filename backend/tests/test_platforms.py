@@ -51,6 +51,42 @@ async def test_list_accounts(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_list_accounts_keyword_search_without_platform(client, auth_headers):
+    await client.post(
+        "/api/v1/platforms",
+        json={
+            "platform": "cloudflare",
+            "account_name": "nancee44lubowitz44@rambler.ru",
+            "credentials": {"api_token": "tok1"},
+        },
+        headers=auth_headers,
+    )
+    await client.post(
+        "/api/v1/platforms",
+        json={
+            "platform": "dynadot",
+            "account_name": "other-account",
+            "credentials": {"api_key": "tok2"},
+        },
+        headers=auth_headers,
+    )
+
+    resp = await client.get("/api/v1/platforms?keyword=nancee44lubowitz44")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["account_name"] == "nancee44lubowitz44@rambler.ru"
+
+    search_resp = await client.get("/api/v1/platforms?search=nancee44lubowitz44")
+
+    assert search_resp.status_code == 200
+    search_data = search_resp.json()
+    assert search_data["total"] == 1
+    assert search_data["items"][0]["account_name"] == "nancee44lubowitz44@rambler.ru"
+
+
+@pytest.mark.asyncio
 async def test_update_account(client, auth_headers):
     create_resp = await client.post(
         "/api/v1/platforms",

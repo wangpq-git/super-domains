@@ -25,6 +25,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         platform: platform.value || undefined,
         sync_status: syncStatus.value || undefined,
         keyword: keyword.value || undefined,
+        search: keyword.value || undefined,
       }, force)
       accounts.value = data.items ?? data.data ?? data ?? []
       total.value = data.total ?? accounts.value.length
