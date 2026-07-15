@@ -30,7 +30,10 @@ export function getServiceDiscoveryConfig(force = false) {
 
 export function getServiceIngresses(namespace?: string, force = false) {
   return cachedGet<ServiceDiscoveryIngressListResponse>('/service-discovery/ingresses', {
-    params: namespace ? { namespace } : {},
+    params: {
+      ...(namespace ? { namespace } : {}),
+      ...(force ? { refresh: true } : {}),
+    },
     force,
     ttl: 60_000,
   })

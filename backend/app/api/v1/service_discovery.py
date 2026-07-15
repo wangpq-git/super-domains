@@ -23,11 +23,12 @@ async def get_service_discovery_config(
 @router.get("/ingresses", response_model=ServiceDiscoveryIngressListResponse)
 async def get_namespace_ingresses(
     namespace: str | None = Query(default=None),
+    refresh: bool = Query(False, description="是否强制刷新远端 Ingress 数据"),
     _current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await service_discovery_service.list_ingresses(db, namespace=namespace)
+        return await service_discovery_service.list_ingresses(db, namespace=namespace, force_refresh=refresh)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

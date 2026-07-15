@@ -1,13 +1,18 @@
 import asyncio
+import json
 from typing import Any
 
+import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.services import system_setting_service
 
 _SERVICE_REGION = "ap-beijing"
 _ACCESS_DENIED_FLAGS = ["AccessDenied", "Access Denied"]
 _DOMAIN_NOT_FOUND_FLAGS = ["DomainConfigNotFoundError", "Bucket domain config not found"]
+_COS_DISCOVERY_CACHE_TTL_SECONDS = 300
+_COS_DISCOVERY_CACHE_KEY = "cos_discovery:domains"
 
 
 def _ensure_list(value: Any) -> list[Any]:
@@ -51,6 +56,25 @@ def _empty_domain_item(bucket_name: str) -> dict[str, str]:
         "origin_type": "",
         "cname": "",
     }
+
+
+async def _get_cached_domains() -> dict[str, Any] | None:
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        raw = await redis.get(_COS_DISCOVERY_CACHE_KEY)
+        if not raw:
+            return None
+        return json.loads(raw)
+    finally:
+        await redis.aclose()
+
+
+async def _set_cached_domains(payload: dict[str, Any]) -> None:
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        await redis.set(_COS_DISCOVERY_CACHE_KEY, json.dumps(payload), ex=_COS_DISCOVERY_CACHE_TTL_SECONDS)
+    finally:
+        await redis.aclose()
 
 
 def _list_cos_domains_sync(secret_id: str, secret_key: str, timeout_seconds: int) -> dict[str, Any]:
@@ -136,11 +160,18 @@ async def get_cos_discovery_config(db: AsyncSession) -> dict[str, bool]:
     return {"configured": bool(secret_id.strip() and secret_key.strip())}
 
 
-async def list_cos_domains(db: AsyncSession) -> dict[str, Any]:
+async def list_cos_domains(db: AsyncSession, force_refresh: bool = False) -> dict[str, Any]:
     secret_id = await system_setting_service.get_string(db, "TENCENT_COS_SECRET_ID")
     secret_key = await system_setting_service.get_string(db, "TENCENT_COS_SECRET_KEY")
     if not secret_id.strip() or not secret_key.strip():
         raise ValueError("请先在配置中心填写腾讯云 SecretId 和 SecretKey")
 
+    if not force_refresh:
+        cached = await _get_cached_domains()
+        if cached:
+            return cached
+
     timeout_seconds = await system_setting_service.get_int(db, "TENCENT_COS_REQUEST_TIMEOUT_SECONDS")
-    return await asyncio.to_thread(_list_cos_domains_sync, secret_id, secret_key, timeout_seconds)
+    payload = await asyncio.to_thread(_list_cos_domains_sync, secret_id, secret_key, timeout_seconds)
+    await _set_cached_domains(payload)
+    return payload

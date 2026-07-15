@@ -21,7 +21,11 @@ export function getCosDiscoveryConfig(force = false) {
 }
 
 export function getCosDomains(force = false) {
-  return cachedGet<CosDiscoveryDomainListResponse>('/cos-discovery/domains', { force, ttl: 60_000 })
+  return cachedGet<CosDiscoveryDomainListResponse>('/cos-discovery/domains', {
+    force,
+    ttl: 60_000,
+    params: force ? { refresh: true } : undefined,
+  })
 }
 
 export function invalidateCosDiscoveryCache() {

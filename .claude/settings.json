@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hive": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/private/tmp/hive/dist/mcp-server/index.js"
+      ]
+    }
+  }
+}
